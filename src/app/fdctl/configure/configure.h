@@ -59,14 +59,13 @@ typedef struct configure_stage {
   void               (*init_perm)( fd_caps_ctx_t * caps, config_t * const config );
   void               (*fini_perm)( fd_caps_ctx_t * caps, config_t * const config );
   void               (*init)     ( config_t * const config );
-  void               (*fini)     ( config_t * const config );
+  void               (*fini)     ( config_t * const config, int pre_init );
   configure_result_t (*check)    ( config_t * const config );
 } configure_stage_t;
 
 extern configure_stage_t hugetlbfs;
 extern configure_stage_t sysctl;
 extern configure_stage_t xdp;
-extern configure_stage_t xdp_leftover;
 extern configure_stage_t ethtool;
 extern configure_stage_t workspace;
 

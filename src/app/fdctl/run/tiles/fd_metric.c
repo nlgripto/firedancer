@@ -20,10 +20,10 @@
 
 typedef struct {
   ulong bytes_read;
-  char input[ 1024 ];
+  char input[ 1024UL ];
 
   ulong output_len;
-  char output[ 1048576 ];
+  char output[ 16777216UL ];
   ulong bytes_written;
 } fd_metric_connection_t;
 
@@ -259,6 +259,9 @@ prometheus_print( fd_topo_t * topo,
   if( FD_UNLIKELY( result<0 ) ) return result;
   PRINT( "\n" );
   result = prometheus_print1( topo, out, out_len, "poh", FD_METRICS_POH_TOTAL, FD_METRICS_POH, PRINT_TILE );
+  if( FD_UNLIKELY( result<0 ) ) return result;
+  PRINT( "\n" );
+  result = prometheus_print1( topo, out, out_len, "store", FD_METRICS_STORE_TOTAL, FD_METRICS_STORE, PRINT_TILE );
   if( FD_UNLIKELY( result<0 ) ) return result;
 
   /* Now backfill Content-Length */

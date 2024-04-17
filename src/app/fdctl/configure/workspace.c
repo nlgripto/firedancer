@@ -19,8 +19,8 @@ init_perm( fd_caps_ctx_t *  caps,
     fd_topo_wksp_t * wksp = &config->topo.workspaces[ i ];
     mlock_limit = fd_ulong_max( mlock_limit, wksp->page_cnt * wksp->page_sz );
   }
-
-  fd_caps_check_resource( caps, NAME, RLIMIT_MEMLOCK, mlock_limit, "increase `RLIMIT_MEMLOCK` to lock the workspace in memory" );
+  /* One 4K page is used by the logging lock */
+  fd_caps_check_resource( caps, NAME, RLIMIT_MEMLOCK, mlock_limit+4096UL, "increase `RLIMIT_MEMLOCK` to lock the workspace in memory" );
 }
 
 static void
@@ -75,10 +75,17 @@ workspace_path( config_t * const config,
 static void
 warn_unknown_files( config_t * const config,
                     ulong            mount_type ) {
-  static char const * MOUNT_NAMES[ 2 ] = { "huge", "gigantic" };
-
-  char mount_path[ FD_SHMEM_PRIVATE_PATH_BUF_MAX ];
-  FD_TEST( fd_cstr_printf_check( mount_path, FD_SHMEM_PRIVATE_PATH_BUF_MAX, NULL, "%s/.%s", fd_shmem_private_base, MOUNT_NAMES[ mount_type ] ));
+  char const * mount_path;
+  switch( mount_type ) {
+    case 0UL:
+      mount_path = config->hugetlbfs.huge_page_mount_path;
+      break;
+    case 1UL:
+      mount_path = config->hugetlbfs.gigantic_page_mount_path;
+      break;
+    default:
+      FD_LOG_ERR(( "invalid mount type %lu", mount_type ));
+  }
 
   /* Check if there are any files in mount_path */
   DIR * dir = opendir( mount_path );
@@ -107,6 +114,20 @@ warn_unknown_files( config_t * const config,
       }
     }
 
+    if( mount_type==0UL ) {
+      for( ulong i=0UL; i<config->topo.tile_cnt; i++ ) {
+        fd_topo_tile_t * tile = &config->topo.tiles [ i ];
+
+        char expected_path[ PATH_MAX ];
+        FD_TEST( fd_cstr_printf_check( expected_path, PATH_MAX, NULL, "%s/%s_stack_%s%lu", config->hugetlbfs.huge_page_mount_path, config->name, tile->name, tile->kind_id ) );
+
+        if( !strcmp( entry_path, expected_path ) ) {
+          known_file = 1;
+          break;
+        }
+      }
+    }
+
     if( FD_UNLIKELY( !known_file ) ) FD_LOG_WARNING(( "unknown file `%s` found in `%s`", entry->d_name, mount_path ));
   }
 
@@ -126,17 +147,46 @@ init( config_t * const config ) {
   for( ulong i=0UL; i<config->topo.wksp_cnt; i++ ) {
     fd_topo_wksp_t * wksp = &config->topo.workspaces[ i ];
 
-    if( FD_UNLIKELY( -1==fd_topo_create_workspace( &config->topo, wksp ) ) ) {
+    char path[ PATH_MAX ];
+    workspace_path( config, wksp, path );
+
+    struct stat st;
+    int result = stat( path, &st );
+
+    int update_existing;
+    if( FD_UNLIKELY( !result && config->is_live_cluster ) ) {
+      FD_LOG_ERR(( "workspace `%s` already exists", path ));
+    } else if( FD_UNLIKELY( !result ) ) {
+      /* Creating all of the workspaces is very expensive because the
+         kernel has to zero out all of the pages.  There can be tens or
+         hundreds of gigabytes of zeroing to do.
+
+         What would be really nice is if the kernel let us create huge
+         pages without zeroing them, but it's not possible.  The
+         ftruncate and fallocate calls do not support this type of
+         resize with the hugetlbfs filesystem.
+
+         Instead.. to prevent repeatedly doing this zeroing every time
+         we start the validator, we have a small hack here to re-use the
+         workspace files if they exist. */
+      update_existing = 1;
+    } else if( FD_LIKELY( result && errno==ENOENT ) ) {
+      update_existing = 0;
+    } else {
+      FD_LOG_ERR(( "stat failed when trying to create workspace `%s` (%i-%s)", path, errno, fd_io_strerror( errno ) ));
+    }
+
+    if( FD_UNLIKELY( -1==fd_topo_create_workspace( &config->topo, wksp, update_existing ) ) ) {
       FD_TEST( errno==ENOMEM );
 
-      warn_unknown_files( config, i );
+      warn_unknown_files( config, wksp->page_sz==FD_SHMEM_HUGE_PAGE_SZ ? 0UL : 1UL );
 
       char path[ PATH_MAX ];
       workspace_path( config, wksp, path );
       FD_LOG_ERR(( "ENOMEM-Out of memory when trying to create workspace `%s` at `%s` "
                    "with %lu %s pages. Firedancer has successfully reserved enough memory "
                    "for all of its workspaces during the `hugetlbfs` configure step, so it is "
-                   "likely you have unused files left over in this directory which are consuming "
+                   "likely you have unknown files left over in this directory which are consuming "
                    "memory, or another program on the system is using pages from the same mount.",
                    wksp->name, path, wksp->page_cnt, fd_shmem_page_sz_to_cstr( wksp->page_sz ) ));
     }
@@ -150,7 +200,30 @@ init( config_t * const config ) {
 }
 
 static void
-fini( config_t * const config ) {
+fini( config_t * const config,
+      int              pre_init ) {
+  for( ulong i=0UL; i<config->topo.tile_cnt; i++ ) {
+    fd_topo_tile_t * tile = &config->topo.tiles [ i ];
+
+    char path[ PATH_MAX ];
+    FD_TEST( fd_cstr_printf_check( path, PATH_MAX, NULL, "%s/%s_stack_%s%lu", config->hugetlbfs.huge_page_mount_path, config->name, tile->name, tile->kind_id ) );
+
+    struct stat st;
+    int result = stat( path, &st );
+    if( FD_LIKELY( !result ) ) {
+      if( FD_UNLIKELY( -1==unlink( path ) ) )
+        FD_LOG_ERR(( "unlink failed when trying to delete path `%s` (%i-%s)", path, errno, fd_io_strerror( errno ) ));
+    }
+    else if( FD_LIKELY( result && errno==ENOENT ) ) continue;
+    else FD_LOG_ERR(( "stat failed when trying to delete path `%s` (%i-%s)", path, errno, fd_io_strerror( errno ) ));
+  }
+
+  if( FD_UNLIKELY( !config->is_live_cluster && pre_init ) ) {
+    /* See note above for why we don't delete the workspace files in
+       this special case. */
+    return;
+  }
+
   for( ulong i=0; i<config->topo.wksp_cnt; i++ ) {
     fd_topo_wksp_t * wksp = &config->topo.workspaces[ i ];
 
@@ -170,22 +243,6 @@ fini( config_t * const config ) {
     }
     else if( FD_LIKELY( result && errno==ENOENT ) ) continue;
     else FD_LOG_ERR(( "stat failed when trying to delete wksp `%s` (%i-%s)", path, errno, fd_io_strerror( errno ) ));
-  }
-
-  for( ulong i=0UL; i<config->topo.tile_cnt; i++ ) {
-    fd_topo_tile_t * tile = &config->topo.tiles [ i ];
-
-    char path[ PATH_MAX ];
-    FD_TEST( fd_cstr_printf_check( path, PATH_MAX, NULL, "%s/%s_stack_%s%lu", config->hugetlbfs.huge_page_mount_path, config->name, tile->name, tile->kind_id ) );
-
-    struct stat st;
-    int result = stat( path, &st );
-    if( FD_LIKELY( !result ) ) {
-      if( FD_UNLIKELY( -1==unlink( path ) ) )
-        FD_LOG_ERR(( "unlink failed when trying to delete path `%s` (%i-%s)", path, errno, fd_io_strerror( errno ) ));
-    }
-    else if( FD_LIKELY( result && errno==ENOENT ) ) continue;
-    else FD_LOG_ERR(( "stat failed when trying to delete path `%s` (%i-%s)", path, errno, fd_io_strerror( errno ) ));
   }
 }
 

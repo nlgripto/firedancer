@@ -13,7 +13,7 @@
 extern fd_topo_run_tile_t * TILES[];
 
 
-#define CONFIGURE_STAGE_COUNT 11
+#define CONFIGURE_STAGE_COUNT 10
 struct configure_stage;
 
 typedef union {
@@ -37,6 +37,7 @@ typedef union {
   } configure;
 
   struct {
+    int  parent_pipefd;
     int  monitor;
     int  no_configure;
     int  no_solana_labs;
@@ -68,6 +69,18 @@ typedef union {
   struct {
     char name[ 13UL ];
   } flame;
+
+  struct {
+    char    affinity[ AFFINITY_SZ ];
+    uint    tpu_ip;
+    uint    rpc_ip;
+    ushort  tpu_port;
+    ushort  rpc_port;
+    ulong   accounts;
+    ulong   connections;
+    ulong   benchg;
+    ulong   benchs;
+  } spammer;
 } args_t;
 
 typedef struct fd_caps_ctx fd_caps_ctx_t;

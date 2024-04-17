@@ -111,7 +111,7 @@ fd_topob_tile( fd_topo_t *    topo,
                char const *   tile_wksp,
                char const *   cnc_wksp,
                char const *   metrics_wksp,
-               ushort         cpu_idx,
+               ulong          cpu_idx,
                int            is_solana_labs,
                char const *   out_link,
                ulong          out_link_kind_id ) {
@@ -120,7 +120,7 @@ fd_topob_tile( fd_topo_t *    topo,
   if( FD_UNLIKELY( topo->tile_cnt>=FD_TOPO_MAX_TILES ) ) FD_LOG_ERR(( "too many tiles" ));
 
   ulong kind_id = 0UL;
-  for( ulong i=0UL; i<topo->link_cnt; i++ ) {
+  for( ulong i=0UL; i<topo->tile_cnt; i++ ) {
     if( !strcmp( topo->tiles[ i ].name, tile_name ) ) kind_id++;
   }
 
