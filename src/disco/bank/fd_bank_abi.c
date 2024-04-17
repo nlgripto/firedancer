@@ -1,5 +1,6 @@
 
 #include "fd_bank_abi.h"
+#include "../../ballet/blake3/blake3.h"
 #include "../../flamenco/runtime/fd_system_ids_pp.h"
 
 #define ABI_ALIGN( x ) __attribute__((packed)) __attribute__((aligned(x)))

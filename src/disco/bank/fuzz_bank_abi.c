@@ -1,8 +1,22 @@
 //includes
+#include <assert.h>
+
 #include "fd_bank_abi.h"
+#include "../metrics/fd_metrics.h"
+#include "../../ballet/txn/fd_txn.h"
+#include "../../ballet/blake3/blake3.h"
+#include "../bank/fd_bank_abi.h"
 #include "../../flamenco/runtime/fd_system_ids_pp.h"
+#include "../../util/sanitize/fd_fuzz.h"
 //globals
 fd_blake3_t blake[1];
+uchar metrics_scratch[ FD_METRICS_FOOTPRINT( 0, 0 ) ] __attribute__((aligned(FD_METRICS_ALIGN)));
+// proto
+extern int
+fd_ext_bank_sanitized_txn_load_addresess( void const * bank,
+                                          void *       address_table_lookups,
+                                          ulong        address_table_lookups_cnt,
+                                          void *       out_sidecar );
 //llvmfuzzerinitialize
 int
 LLVMFuzzerInitialize( int  *   argc,
@@ -10,34 +24,65 @@ LLVMFuzzerInitialize( int  *   argc,
   /* Set up shell without signal handlers */
   putenv( "FD_LOG_BACKTRACE=0" );
   fd_boot( argc, argv );
+  fd_metrics_register( (ulong *)fd_metrics_new( metrics_scratch, 0UL, 0UL ) );
+
   atexit( fd_halt );
   return 0;
 }
 
-//llvmfuzzertestoneinput
-int
-LLVMFuzzerTestOneInput( uchar const * data,
-                        ulong         data_sz ) {
-  fd_txn_t tx [1];
-  // coinflip tx ver
-  if (heads)
-  {
-    tx->transaction_version = FD_TXN_VLEGACY;
+// LLVMFuzzerTestOneInput
+int 
+LLVMFuzzerTestOneInput(uchar const* data, ulong data_sz) {
+  if (data_sz < sizeof(fd_txn_t)) {
+    return 0;  // Input too small
   }
-  else if (tails)
-  {
-    tx->transaction_version = FD_TXN_V0;
+
+  fd_txn_t* tx = (fd_txn_t*)data;
+
+  // Limit signature_cnt to valid range
+  tx->signature_cnt = tx->signature_cnt % (FD_TXN_SIG_MAX + 1);
+  if (tx->signature_cnt == 0) {
+    tx->signature_cnt = 1;  // Ensure at least one signature
   }
-  // roll for signature count
 
+  // Limit readonly_signed_cnt to valid range
+  tx->readonly_signed_cnt = tx->readonly_signed_cnt % tx->signature_cnt;
 
-  int res = fd_bank_abi_txn_init( fd_bank_abi_txn_t * out_txn,
-                      uchar *             out_sidecar,
-                      void const *        bank,
-                      fd_blake3_t *       blake,
-                      uchar *             payload,
-                      ulong               payload_sz,
-                      fd_txn_t *          tx,
-                      int                 is_simple_vote );
+  // Limit acct_addr_cnt to valid range
+  tx->acct_addr_cnt = tx->acct_addr_cnt % (FD_TXN_ACCT_ADDR_MAX + 1);
+  if (tx->acct_addr_cnt == 0) {
+    tx->acct_addr_cnt = 1;  // Ensure at least one account address
+  }
 
+  // Limit readonly_unsigned_cnt to valid range
+  tx->readonly_unsigned_cnt = tx->readonly_unsigned_cnt % (tx->acct_addr_cnt - tx->signature_cnt + 1);
+
+  // Limit addr_table_lookup_cnt to valid range
+  tx->addr_table_lookup_cnt = tx->addr_table_lookup_cnt % (FD_TXN_ADDR_TABLE_LOOKUP_MAX + 1);
+
+  // Limit addr_table_adtl_writable_cnt to valid range
+  tx->addr_table_adtl_writable_cnt = tx->addr_table_adtl_writable_cnt % (tx->addr_table_adtl_cnt + 1);
+
+  // Limit addr_table_adtl_cnt to valid range
+  tx->addr_table_adtl_cnt = tx->addr_table_adtl_cnt % (255 - tx->acct_addr_cnt + 1);
+
+  // Limit instr_cnt to valid range
+  tx->instr_cnt = tx->instr_cnt % (FD_TXN_INSTR_MAX + 1);
+
+ // Allocate and initialize fd_bank_abi_txn_t and sidecar buffer
+  uchar out_txn_buf[FD_BANK_ABI_TXN_FOOTPRINT];
+  fd_bank_abi_txn_t* out_txn = (fd_bank_abi_txn_t*)out_txn_buf;
+
+  uchar out_sidecar[FD_BANK_ABI_TXN_FOOTPRINT_SIDECAR_MAX];
+
+  int res = fd_bank_abi_txn_init(out_txn,
+                                 out_sidecar,
+                                 NULL,  //TODO figure out howto get a valid `bank` obj
+                                 blake,
+                                 (uchar*)data,
+                                 data_sz,
+                                 tx,
+                                 0);  // is_simple_vote
+  assert(res != 0);
+  return 0;
 }
