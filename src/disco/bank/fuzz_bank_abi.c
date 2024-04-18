@@ -12,11 +12,27 @@
 fd_blake3_t blake[1];
 uchar metrics_scratch[ FD_METRICS_FOOTPRINT( 0, 0 ) ] __attribute__((aligned(FD_METRICS_ALIGN)));
 // proto
-extern int
+int
+fd_bank_abi_txn_init( fd_bank_abi_txn_t * out_txn,
+                      uchar *             out_sidecar,
+                      void const *        bank,
+                      fd_blake3_t *       blake3,
+                      uchar *             payload,
+                      ulong               payload_sz,
+                      fd_txn_t *          txn,
+                      int                 is_simple_vote );
+// mock this here
+int
 fd_ext_bank_sanitized_txn_load_addresess( void const * bank,
                                           void *       address_table_lookups,
                                           ulong        address_table_lookups_cnt,
-                                          void *       out_sidecar );
+                                          void *       out_sidecar ) {
+  (void)bank;
+  (void)address_table_lookups;
+  (void)address_table_lookups_cnt;
+  (void)out_sidecar;
+  return 0;
+}
 //llvmfuzzerinitialize
 int
 LLVMFuzzerInitialize( int  *   argc,
@@ -44,6 +60,9 @@ LLVMFuzzerTestOneInput(uchar const* data, ulong data_sz) {
   if (tx->signature_cnt == 0) {
     tx->signature_cnt = 1;  // Ensure at least one signature
   }
+
+  //TODO coinflip; hardcode version 
+  tx->transaction_version = FD_TXN_VLEGACY;
 
   // Limit readonly_signed_cnt to valid range
   tx->readonly_signed_cnt = tx->readonly_signed_cnt % tx->signature_cnt;
@@ -74,12 +93,21 @@ LLVMFuzzerTestOneInput(uchar const* data, ulong data_sz) {
   fd_bank_abi_txn_t* out_txn = (fd_bank_abi_txn_t*)out_txn_buf;
 
   uchar out_sidecar[FD_BANK_ABI_TXN_FOOTPRINT_SIDECAR_MAX];
-
+  // uchar bank_scratch[272UL*1024UL*1024UL];
+  //need to not oob on the payload_sz - tx->message_off
+  if (tx->message_off > data_sz) {
+    tx->message_off = tx->message_off % data_sz;
+  }
+  //make sure payload is big enough for bank abi to look for upgradeable loader
+  uchar bigp [data_sz*tx->acct_addr_cnt];
+  // make sure acct_addr_off is within our newly-sized payload
+  tx->acct_addr_off = 0;
   int res = fd_bank_abi_txn_init(out_txn,
                                  out_sidecar,
-                                 NULL,  //TODO figure out howto get a valid `bank` obj
+                                 NULL,
+                                //  (void *)bank_scratch,  //TODO figure out howto get a valid `bank` obj
                                  blake,
-                                 (uchar*)data,
+                                 (uchar*)bigp,
                                  data_sz,
                                  tx,
                                  0);  // is_simple_vote
