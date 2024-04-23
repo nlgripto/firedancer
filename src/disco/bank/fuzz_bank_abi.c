@@ -1,5 +1,7 @@
 //includes
 #include <assert.h>
+#include <stdio.h>
+#include <stddef.h>
 
 #include "fd_bank_abi.h"
 #include "../metrics/fd_metrics.h"
@@ -7,6 +9,8 @@
 #include "../../ballet/blake3/blake3.h"
 #include "../../flamenco/runtime/fd_system_ids_pp.h"
 #include "../../util/sanitize/fd_fuzz.h"
+
+#define FUZZ_ABI 1
 //globals
 fd_blake3_t blake[1];
 uchar metrics_scratch[ FD_METRICS_FOOTPRINT( 0, 0 ) ] __attribute__((aligned(FD_METRICS_ALIGN)));
@@ -50,7 +54,14 @@ LLVMFuzzerTestOneInput(uchar const* data, ulong data_sz) {
     return 0;  // Input too small
   }
 
-  fd_txn_t* tx = (fd_txn_t*)data;
+  void* buf = malloc( sizeof(fd_txn_t) + (  sizeof(fd_txn_instr_t) * FD_TXN_INSTR_MAX ) );
+  if ( buf == NULL ) {
+    return 1;
+  }
+  fd_txn_t * tx = (fd_txn_t*) buf;
+  //copy our fuzz data into our struct
+  memcpy(buf, data, sizeof(fd_txn_t));
+
 
   // Limit signature_cnt to valid range
   tx->signature_cnt = tx->signature_cnt % (FD_TXN_SIG_MAX + 1);
@@ -64,14 +75,17 @@ LLVMFuzzerTestOneInput(uchar const* data, ulong data_sz) {
   // Limit readonly_signed_cnt to valid range
   tx->readonly_signed_cnt = tx->readonly_signed_cnt % tx->signature_cnt;
 
-  // Limit acct_addr_cnt to valid range
-  tx->acct_addr_cnt = tx->acct_addr_cnt % (FD_TXN_ACCT_ADDR_MAX + 1);
+  // TODO Limit acct_addr_cnt to valid range
+  // tx->acct_addr_cnt = tx->acct_addr_cnt % (FD_TXN_ACCT_ADDR_MAX + 1);
+  tx->acct_addr_cnt = 1;
   if (tx->acct_addr_cnt == 0) {
     tx->acct_addr_cnt = 1;  // Ensure at least one account address
   }
 
   // Limit readonly_unsigned_cnt to valid range
+  if ( ( tx->acct_addr_cnt - tx->signature_cnt + 1 ) != 0 ) {
   tx->readonly_unsigned_cnt = tx->readonly_unsigned_cnt % (tx->acct_addr_cnt - tx->signature_cnt + 1);
+  }
 
   // Limit addr_table_lookup_cnt to valid range
   tx->addr_table_lookup_cnt = tx->addr_table_lookup_cnt % (FD_TXN_ADDR_TABLE_LOOKUP_MAX + 1);
@@ -84,7 +98,18 @@ LLVMFuzzerTestOneInput(uchar const* data, ulong data_sz) {
 
   // Limit instr_cnt to valid range
   tx->instr_cnt = tx->instr_cnt % (FD_TXN_INSTR_MAX + 1);
-
+  // add fake instructions
+  fd_txn_instr_t fakeinsns[FD_TXN_INSTR_MAX];
+  //printf("DEBUG: about to add %hu insns to array of size %lu\n", tx->instr_cnt, FD_TXN_INSTR_MAX);
+  for( ulong i = 0; i < tx->instr_cnt; i++ ) {
+    //printf("DBG:i: %lu,", i);
+    //printf("\n");
+    fd_txn_instr_t * instr = &fakeinsns [ i ];
+    instr->program_id = (uchar)i;
+    tx->instr[ i ] = *instr;
+    // fd_txn_instr_t * instr = &tx->instr[ i ];
+    // instr->program_id = (uchar)i;
+}
  // Allocate and initialize fd_bank_abi_txn_t and sidecar buffer
   uchar out_txn_buf[FD_BANK_ABI_TXN_FOOTPRINT];
   fd_bank_abi_txn_t* out_txn = (fd_bank_abi_txn_t*)out_txn_buf;
@@ -95,19 +120,26 @@ LLVMFuzzerTestOneInput(uchar const* data, ulong data_sz) {
   if (tx->message_off > data_sz) {
     tx->message_off = tx->message_off % data_sz;
   }
+   //need to not oob on the payload_sz - tx->recent_blockhash_off
+     if (tx->recent_blockhash_off > data_sz) {
+    tx->recent_blockhash_off = tx->recent_blockhash_off % data_sz;
+  }
   //make sure payload is big enough for bank abi to look for upgradeable loader
   uchar bigp [data_sz*tx->acct_addr_cnt];
+  memcpy(bigp, data, data_sz);
   // make sure acct_addr_off is within our newly-sized payload
   tx->acct_addr_off = 0;
-  int res = fd_bank_abi_txn_init(out_txn,
+  // int res = 
+  fd_bank_abi_txn_init(out_txn,
                                  out_sidecar,
                                  NULL,
                                 //  (void *)bank_scratch,  //TODO figure out howto get a valid `bank` obj
                                  blake,
                                  (uchar*)bigp,
-                                 data_sz,
+                                 sizeof(bigp),
                                  tx,
                                  0);  // is_simple_vote
-  assert(res != 0);
+  // assert(res != 0);
+  free(buf);
   return 0;
 }

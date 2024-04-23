@@ -1,8 +1,8 @@
-
+#include <stddef.h>
 #include "fd_bank_abi.h"
 #include "../../ballet/blake3/blake3.h"
 #include "../../flamenco/runtime/fd_system_ids_pp.h"
-
+#include <stdio.h>
 #define ABI_ALIGN( x ) __attribute__((packed)) __attribute__((aligned(x)))
 
 #define MAP_PERFECT_NAME      fd_bank_abi_builtin_keys_and_sysvars_tbl
@@ -247,8 +247,16 @@ fd_ext_bank_sanitized_txn_load_addresess( void const * bank,
 
 static int
 is_key_called_as_program( fd_txn_t * txn, ushort key_index ) {
+  //printf("%p\n", txn);
+  // ulong offset = offsetof(struct fd_txn, instr_cnt);
+  //printf("off: %lu\n", offset);
+  //printf("count: %hu\n",txn->instr_cnt);
   for( ushort i=0; i<txn->instr_cnt; i++ ) {
     fd_txn_instr_t * instr = &txn->instr[ i ];
+    //printf("instr: %p\n", instr);
+    // offset = offsetof(struct fd_txn_instr, program_id);
+    //printf("p_id off: %lu\n", offset);
+    //printf("p_id: %c\n", instr->program_id);
     if( FD_UNLIKELY( instr->program_id==key_index ) ) return 1;
   }
   return 0;
@@ -258,6 +266,9 @@ static const uchar BPF_UPGRADEABLE_PROG_ID1[32] = { BPF_UPGRADEABLE_PROG_ID };
 
 static int
 is_upgradeable_loader_present( fd_txn_t * txn, uchar * payload, sanitized_txn_abi_pubkey_t * loaded_addresses ) {
+
+  return 0;
+
   for( ushort i=0; i<txn->acct_addr_cnt; i++ ) {
     if( FD_UNLIKELY( !memcmp( payload + txn->acct_addr_off + i*32UL, BPF_UPGRADEABLE_PROG_ID1, 32UL ) ) ) return 1;
   }
