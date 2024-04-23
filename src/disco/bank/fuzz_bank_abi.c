@@ -5,22 +5,19 @@
 #include "../metrics/fd_metrics.h"
 #include "../../ballet/txn/fd_txn.h"
 #include "../../ballet/blake3/blake3.h"
-#include "../bank/fd_bank_abi.h"
 #include "../../flamenco/runtime/fd_system_ids_pp.h"
 #include "../../util/sanitize/fd_fuzz.h"
 //globals
 fd_blake3_t blake[1];
 uchar metrics_scratch[ FD_METRICS_FOOTPRINT( 0, 0 ) ] __attribute__((aligned(FD_METRICS_ALIGN)));
-// proto
-int
-fd_bank_abi_txn_init( fd_bank_abi_txn_t * out_txn,
-                      uchar *             out_sidecar,
-                      void const *        bank,
-                      fd_blake3_t *       blake3,
-                      uchar *             payload,
-                      ulong               payload_sz,
-                      fd_txn_t *          txn,
-                      int                 is_simple_vote );
+int fd_bank_abi_txn_init( fd_bank_abi_txn_t * out_txn,       /* Memory to place the result in, must be at least FD_BANK_ABI_TXN_FOOTPRINT bytes. */
+                      uchar *             out_sidecar,   /* Memory to place sidecar data in, must be at least FD_BANK_ABI_TXN_FOOTPRINT_SIDECAR( out_txn ) bytes. */
+                      void const *        bank,          /* Pointer to a Solana `Bank` object the transaction is being loaded for.  */
+                      fd_blake3_t *       blake3,        /* Blake3 implementation used to create `message_hash` of the transaction. */
+                      uchar *             payload,       /* Transaction raw wire payload. */
+                      ulong               payload_sz,    /* Transaction raw wire size. */
+                      fd_txn_t *          txn,           /* The Firedancer parsed transaction representation. */
+                      int                 is_simple_vote /* If the transaction is a "simple vote" or not. */ );
 // mock this here
 int
 fd_ext_bank_sanitized_txn_load_addresess( void const * bank,
