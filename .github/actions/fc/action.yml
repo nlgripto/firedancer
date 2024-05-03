@@ -26,15 +26,18 @@ runs:
         sudo apt install -y zip unzip
       shell: bash
 
-    - name: Generate fuzz targets and .fc files
+    - name: Generate fuzz targets and .fc files, md5 zipfile
+      id: fileops
       run: |
         ls contrib/test || ls contrib/*
         chmod +x ./contrib/test/bundle-binaries-fc.sh
-        ./contrib/test/bundle-binaries-fc.sh ./build
+        ./contrib/test/bundle-binaries-fc.sh ./build ./fc-fd-latest.zip
+        FCBUNDLEMD5=$(md5sum ./fc-fd-latest.zip | cut -d' ' -f1)
+        echo "bundle-md5=$FCBUNDLEMD5" >> "$GITHUB_OUTPUT"
       shell: bash
-    # TODO: Change this to FC AWS S3
-    - name: Upload merged zipfile
-      uses: actions/upload-artifact@v4
-      with:
-        name: fc-fd-latest.zip
-        path: ./targets
+      
+    - name: Upload to FC S3
+      run: |
+        aws s3 cp ./fc-fd-latest.zip  s3://fuzzcorp-bundle-dropbox-975049986498-86c13d2/org_rvfruw8l/prj_rvfruw8lvGQ/${{ steps.fileops.outputs.bundle-md5 }}.zip
+
+ 

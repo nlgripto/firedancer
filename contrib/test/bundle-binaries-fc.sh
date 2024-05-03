@@ -16,7 +16,8 @@ for arch in haswell icelake; do
       target_path="targets/$arch/$compiler/$target"
       mkdir -p "$target_path"
       
-      # Copy the fuzz target binary
+      # Chmod and copy the fuzz target binary
+      chmod +x "$target_dir/$target"
       cp "$target_dir/$target" "$target_path/"
       
       # Create the .fc file
@@ -37,7 +38,6 @@ EOL
   done
 done
 
-# Final Zip Archive creation is handled by the GitHub Action
-# zip -r "$output_zip" targets/
+zip -r "$output_zip" targets/
 
 echo "Fuzz targets and .fc files generated successfully!"
