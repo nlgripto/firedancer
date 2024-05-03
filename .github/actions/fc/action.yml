@@ -2,6 +2,14 @@ name: Generate Firedancer Fuzz Targets
 description: Generates Firedancer fuzz targets and .fc files
 
 inputs:
+  SKID:
+    description: "AWS Secret key id"
+    required: true
+    type: string
+  AKID:
+    description: "AWS access key"
+    required: true
+    type: string
   previous_action_outputs:
     description: 'Outputs from the previous action'
     required: true
@@ -38,8 +46,8 @@ runs:
 
     - name: Upload to FC S3
       env:
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_AKID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SKID }}
+        AWS_ACCESS_KEY_ID: ${{ inputs.AKID }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.SKID }}
       run: |
         s3 cp ./fc-fd-latest.zip  s3://fuzzcorp-bundle-dropbox-975049986498-86c13d2/org_rvfruw8l/prj_rvfruw8lvGQ/${{ steps.fileops.outputs.bundle-md5 }}.zip
       shell: bash

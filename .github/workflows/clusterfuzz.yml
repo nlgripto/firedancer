@@ -79,6 +79,8 @@ jobs:
     - uses: actions/checkout@v4
     - uses: ./.github/actions/fc
       with:
+        SKID: ${{ secrets.AWS_SKID }}
+        AKID:  ${{ secrets.AWS_AKID }}
         previous_action_outputs: |
           ${{ github.run_id }}-linux_clang_haswell
           ${{ github.run_id }}-linux_clang_icelake
