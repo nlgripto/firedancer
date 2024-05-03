@@ -34,9 +34,15 @@ for arch in haswell icelake; do
   }
 }
 EOL
-    done
-  done
-done
+    done # end targs
+
+    LIB_DIR=targets/$arch/$compiler/lib
+    mkdir -p $LIB_DIR
+    cp $build_dir/lib/*.so* $LIB_DIR
+    
+  done # end compilers
+
+done # end arch
 
 zip -r "$output_zip" targets/
 
