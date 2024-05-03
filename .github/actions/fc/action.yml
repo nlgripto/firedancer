@@ -1,0 +1,55 @@
+name: Generate Firedancer Fuzz Targets
+description: Generates Firedancer fuzz targets and .fc files
+
+inputs:
+  SKID:
+    description: "AWS Secret key id"
+    required: true
+    type: string
+  AKID:
+    description: "AWS access key"
+    required: true
+    type: string
+  previous_action_outputs:
+    description: 'Outputs from the previous action'
+    required: true
+    type: string
+
+runs:
+  using: "composite"
+  steps:
+    - name: checkout fd
+      uses: actions/checkout@v4
+
+    - name: Download artifacts from previous action
+      id: get-artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: build
+        merge-multiple: true
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y zip unzip
+      shell: bash
+
+    - name: Generate fuzz targets and .fc files, md5 zipfile
+      id: fileops
+      run: |
+        ls contrib/test || ls contrib/*
+        chmod +x ./contrib/test/bundle-binaries-fc.sh
+        ./contrib/test/bundle-binaries-fc.sh ./build ./fc-fd-latest.zip
+        FCBUNDLEMD5=$(md5sum ./fc-fd-latest.zip | cut -d' ' -f1)
+        echo "bundle-md5=$FCBUNDLEMD5" >> "$GITHUB_OUTPUT"
+      shell: bash
+
+    - name: Upload to FC S3
+      env:
+        AWS_ACCESS_KEY_ID: ${{ inputs.AKID }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.SKID }}
+        AWS_DEFAULT_REGION: us-east-2
+      run: |
+        aws s3 cp --debug ./fc-fd-latest.zip  s3://fuzzcorp-bundle-dropbox-975049986498-86c13d2/org_rvfruw8l/prj_rvfruw8lvGQ/${{ steps.fileops.outputs.bundle-md5 }}.zip
+      shell: bash
+ 
