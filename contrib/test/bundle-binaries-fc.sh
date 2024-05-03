@@ -38,8 +38,9 @@ EOL
 
     LIB_DIR=targets/$arch/$compiler/lib
     mkdir -p $LIB_DIR
+    ls $build_dir/*lib || ls $build_dir 
     cp $build_dir/lib/*.so* $LIB_DIR
-    
+
   done # end compilers
 
 done # end arch

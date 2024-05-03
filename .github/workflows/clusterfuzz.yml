@@ -52,23 +52,19 @@ jobs:
           qualifier: ${{ matrix.qualifier }}
           service-account-credentials: ${{ secrets.FUZZ_SERVICE_ACCT_JSON_BUNDLE }}
 
-      - name: Find the tmpdir containing our binaries and rewritten libs
+      - name: Find the tmpdir containing our binaries and rewritten-rpath libs
         id: find-fuzzdir
         run: |
           FD_DIR=$(find /tmp/ | grep fdfuzz | head -n 1)
-          echo "fd-dir=$FD_DIR" >> "$GITHUB_OUTPUT"
+          mkdir -p ./build/lib
+          cp $FD_DIR/lib/*.so* ./build/lib/
       - uses: actions/upload-artifact@v4
-        name: Upload harness binaries to GHA Artifacts
+        name: Upload harness binaries and libs to GHA Artifacts
         with:
           name: ${{ github.run_id }}-${{ matrix.machine }}
           path: ./build/
           retention-days: 1
-      - uses: actions/upload-artifact@v4
-        name: Upload .so dependency libraries to GHA Artifacts
-        with:
-          name: ${{ github.run_id }}-${{ matrix.machine }}-lib
-          path: ${{ steps.find-fuzzdir.outputs.fd-dir }}/lib/*.so*
-          retention-days: 1
+
 
   fuzzcorp-publish:
     needs: clusterfuzz-publish
@@ -84,5 +80,4 @@ jobs:
         previous_action_outputs: |
           ${{ github.run_id }}-linux_clang_haswell
           ${{ github.run_id }}-linux_clang_icelake
-          ${{ github.run_id }}-linux_clang_haswell-lib
-          ${{ github.run_id }}-linux_clang_icelake-lib
+
