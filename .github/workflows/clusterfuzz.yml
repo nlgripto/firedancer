@@ -70,7 +70,7 @@ jobs:
           path: ${{ steps.find-fuzzdir.outputs.fd-dir }}/lib/*.a
           retention-days: 1
 
-  fc-publish:
+  fuzzcorp-publish:
     needs: clusterfuzz-publish
     runs-on:
       ubuntu-latest
