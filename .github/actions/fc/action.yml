@@ -48,6 +48,7 @@ runs:
       env:
         AWS_ACCESS_KEY_ID: ${{ inputs.AKID }}
         AWS_SECRET_ACCESS_KEY: ${{ inputs.SKID }}
+        AWS_DEFAULT_REGION: us-east-2
       run: |
         aws s3 cp --debug ./fc-fd-latest.zip  s3://fuzzcorp-bundle-dropbox-975049986498-86c13d2/org_rvfruw8l/prj_rvfruw8lvGQ/${{ steps.fileops.outputs.bundle-md5 }}.zip
       shell: bash
