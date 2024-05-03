@@ -64,10 +64,10 @@ jobs:
           path: ./build/
           retention-days: 1
       - uses: actions/upload-artifact@v4
-        name: Upload .a dependency libraries to GHA Artifacts
+        name: Upload .so dependency libraries to GHA Artifacts
         with:
           name: ${{ github.run_id }}-${{ matrix.machine }}-lib
-          path: ${{ steps.find-fuzzdir.outputs.fd-dir }}/lib/*.a
+          path: ${{ steps.find-fuzzdir.outputs.fd-dir }}/lib/*.so*
           retention-days: 1
 
   fuzzcorp-publish:
