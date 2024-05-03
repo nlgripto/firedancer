@@ -35,9 +35,9 @@ runs:
         FCBUNDLEMD5=$(md5sum ./fc-fd-latest.zip | cut -d' ' -f1)
         echo "bundle-md5=$FCBUNDLEMD5" >> "$GITHUB_OUTPUT"
       shell: bash
-      
+
     - name: Upload to FC S3
       run: |
         aws s3 cp ./fc-fd-latest.zip  s3://fuzzcorp-bundle-dropbox-975049986498-86c13d2/org_rvfruw8l/prj_rvfruw8lvGQ/${{ steps.fileops.outputs.bundle-md5 }}.zip
-
+      shell: bash
  
