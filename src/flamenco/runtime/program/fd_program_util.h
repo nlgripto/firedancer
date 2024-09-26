@@ -2,7 +2,8 @@
 #define HEADER_fd_src_flamenco_runtime_native_program_util_h
 
 #include "../../fd_flamenco_base.h"
-#include "../fd_executor.h"
+#include "../fd_executor_err.h"
+#include "../fd_borrowed_account.h"
 
 #define FD_DEBUG_MODE 0
 
@@ -54,11 +55,14 @@ fd_ulong_checked_sub_expect( ulong a, ulong b, char const * expect ) {
 static inline int
 fd_borrowed_account_checked_add_lamports( fd_borrowed_account_t * self,
                                           ulong                   lamports ) {
-  // FIXME suppress warning
   ulong temp;
   int   rc = fd_int_if( __builtin_uaddl_overflow( self->meta->info.lamports, lamports, &temp ),
                       FD_EXECUTOR_INSTR_ERR_ARITHMETIC_OVERFLOW,
                       FD_EXECUTOR_INSTR_SUCCESS );
+
+  if (FD_EXECUTOR_INSTR_SUCCESS != rc)
+    return rc;
+
   self->meta->info.lamports = temp;
   return rc;
 }

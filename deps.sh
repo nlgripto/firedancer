@@ -98,21 +98,27 @@ checkout_repo () {
 }
 
 fetch () {
+  git submodule update --init
+
   mkdir -pv ./opt/git
 
-  checkout_repo zlib      https://github.com/madler/zlib            "v1.2.13"
-  checkout_repo zstd      https://github.com/facebook/zstd          "v1.5.5"
-  #checkout_repo openssl   https://github.com/openssl/openssl        "openssl-3.3.0"
+  checkout_repo zstd      https://github.com/facebook/zstd          "v1.5.6"
+  checkout_repo lz4       https://github.com/lz4/lz4                "v1.9.4"
+  checkout_repo secp256k1 https://github.com/bitcoin-core/secp256k1 "v0.5.0"
+  #checkout_repo openssl   https://github.com/openssl/openssl        "openssl-3.3.1"
   if [[ $DEVMODE == 1 ]]; then
-    checkout_repo secp256k1 https://github.com/bitcoin-core/secp256k1 "v0.3.2"
-    checkout_repo rocksdb   https://github.com/facebook/rocksdb       "v9.1.0"
-    checkout_repo snappy    https://github.com/google/snappy          "1.1.10"
-    checkout_repo libff     https://github.com/firedancer-io/libff.git "develop"
+    checkout_repo zlib      https://github.com/madler/zlib            "v1.3.1"
+    checkout_repo rocksdb   https://github.com/facebook/rocksdb       "v9.4.0"
+    checkout_repo snappy    https://github.com/google/snappy          "1.2.1"
+    checkout_repo luajit    https://github.com/LuaJIT/LuaJIT          "v2.0.5"
   fi
 }
 
 check_fedora_pkgs () {
-  local REQUIRED_RPMS=( perl autoconf gettext-devel automake flex bison cmake clang gmp-devel protobuf-compiler llvm-toolset lcov )
+  local REQUIRED_RPMS=( perl autoconf gettext-devel automake flex bison cmake clang gmp-devel protobuf-compiler llvm-toolset lcov systemd-devel pkgconf )
+  if [[ $DEVMODE == 1 ]]; then
+    REQUIRED_RPMS+=( lua5.1 lua5.1-bitop )
+  fi
 
   echo "[~] Checking for required RPM packages"
 
@@ -129,14 +135,17 @@ check_fedora_pkgs () {
   fi
 
   if [[ -z "${SUDO}" ]]; then
-    PACKAGE_INSTALL_CMD=( dnf install -y ${MISSING_RPMS[*]} )
+    PACKAGE_INSTALL_CMD=( dnf install -y --skip-broken ${MISSING_RPMS[*]} )
   else
-    PACKAGE_INSTALL_CMD=( "${SUDO}" dnf install -y ${MISSING_RPMS[*]} )
+    PACKAGE_INSTALL_CMD=( "${SUDO}" dnf install -y --skip-broken ${MISSING_RPMS[*]} )
   fi
 }
 
 check_debian_pkgs () {
-  local REQUIRED_DEBS=( perl autoconf gettext automake autopoint flex bison build-essential gcc-multilib protobuf-compiler llvm lcov libgmp-dev )
+  local REQUIRED_DEBS=( perl autoconf gettext automake autopoint flex bison build-essential gcc-multilib protobuf-compiler llvm lcov libgmp-dev libudev-dev cmake libclang-dev pkgconf )
+  if [[ $DEVMODE == 1 ]]; then
+    REQUIRED_DEBS+=( lua5.1 lua5.1-bitop )
+  fi
 
   echo "[~] Checking for required DEB packages"
 
@@ -234,7 +243,30 @@ check () {
         echo "[+] Finished installing missing packages"
         ;;
       *)
-        echo "[-] Skipping formula install"
+        echo "[-] Skipping package install"
+        ;;
+    esac
+  fi
+
+  if [[ ! -x "$(command -v cargo)" ]]; then
+    echo "[!] cargo is not in PATH"
+    source "$HOME/.cargo/env" || true
+  fi
+  if [[ ! -x "$(command -v cargo)" ]]; then
+    if [[ "${FD_AUTO_INSTALL_PACKAGES:-}" == "1" ]]; then
+      choice=y
+    else
+      read -r -p "[?] Install rustup? (y/N) " choice
+    fi
+    case "$choice" in
+      y|Y)
+        echo "[+] Installing rustup"
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source "$HOME/.cargo/env"
+        rustup toolchain add 1.75.0
+        ;;
+      *)
+        echo "[-] Skipping rustup install"
         ;;
     esac
   fi
@@ -263,6 +295,14 @@ install_zstd () {
   echo "[+] Installing zstd to $PREFIX"
   "${MAKE[@]}" DESTDIR="$PREFIX" PREFIX="" MOREFLAGS="-fPIC" install-pc install-static install-includes
   echo "[+] Successfully installed zstd"
+}
+
+install_lz4 () {
+  cd ./opt/git/lz4/lib
+
+  echo "[+] Installing lz4 to $PREFIX"
+  "${MAKE[@]}" PREFIX="$PREFIX" BUILD_SHARED=no MOREFLAGS="-fPIC" install
+  echo "[+] Successfully installed lz4"
 }
 
 install_secp256k1 () {
@@ -386,10 +426,8 @@ install_rocksdb () {
   ROCKSDB_DISABLE_NUMA=1 \
   ROCKSDB_DISABLE_ZLIB=1 \
   ROCKSDB_DISABLE_BZIP=1 \
-  ROCKSDB_DISABLE_LZ4=1 \
   ROCKSDB_DISABLE_GFLAGS=1 \
-  PORTABLE=haswell \
-  CFLAGS="-isystem $(pwd)/../../include -g0 -DSNAPPY -DZSTD" \
+  CFLAGS="-isystem $(pwd)/../../include -g0 -DSNAPPY -DZSTD -Wno-unknown-warning-option -Wno-uninitialized -Wno-array-bounds -Wno-stringop-overread" \
   make -j $NJOBS \
     LITE=1 \
     V=1 \
@@ -423,48 +461,29 @@ install_snappy () {
   echo "[+] Successfully installed snappy"
 }
 
-install_libff () {
-  cd ./opt/git/libff
-  git submodule init
-  git submodule update
-  mkdir -p build
-  cd build
-  cmake .. \
-    -G"Unix Makefiles" \
-    -DCMAKE_INSTALL_PREFIX:PATH="$PREFIX" \
-    -DCMAKE_INSTALL_LIBDIR="lib" \
-    -DBUILD_GMOCK=OFF \
-    -DBUILD_TESTING=OFF \
-    -DINSTALL_GTEST=OFF \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-  echo "[+] Configured libff"
-
-  echo "[+] Building libff"
-  make -j
-  echo "[+] Successfully built libff"
-
-  echo "[+] Installing libff to $PREFIX"
-  make install
-  echo "[+] Successfully installed libff"
-}
-
 install () {
-  CC="$(command -v gcc)"
+  _CC="${CC:=gcc}"
+  CC="$(command -v $_CC)"
   cc="$CC"
   export CC
   export cc
 
+  _CXX="${CXX:=g++}"
+  CXX="$(command -v $_CXX)"
+  cxx="$CXX"
+  export CXX
+  export cxx
+
   mkdir -p ./opt/{include,lib}
 
-  ( install_zlib      )
   ( install_zstd      )
+  ( install_lz4       )
+  ( install_secp256k1 )
   #( install_openssl   )
   if [[ $DEVMODE == 1 ]]; then
-    ( install_secp256k1 )
+    ( install_zlib      )
     ( install_snappy    )
     ( install_rocksdb   )
-    #( install_libff     )
   fi
 
   # Remove cmake and pkgconfig files, so we don't accidentally

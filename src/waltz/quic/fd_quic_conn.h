@@ -2,12 +2,16 @@
 #define HEADER_fd_src_waltz_quic_fd_quic_conn_h
 
 #include "fd_quic.h"
+#include "fd_quic_retry.h"
 #include "fd_quic_stream.h"
 #include "fd_quic_conn_id.h"
 #include "crypto/fd_quic_crypto_suites.h"
 #include "templ/fd_quic_transport_params.h"
 #include "fd_quic_pkt_meta.h"
 #include "templ/fd_quic_union.h"
+
+/* Minimum number of streams per connection */
+#define FD_QUIC_STREAM_MIN 16UL
 
 #define FD_QUIC_CONN_STATE_INVALID            0 /* dead object / freed */
 #define FD_QUIC_CONN_STATE_HANDSHAKE          1 /* currently doing handshaking with peer */
@@ -78,9 +82,10 @@ struct fd_quic_conn {
   fd_quic_t *        quic;
   void *             context;             /* user context */
 
-  int                server;              /* role from self POV: 0=client, 1=server */
-  int                established;         /* used by clients to determine whether to
+  uint               server      : 1;     /* role from self POV: 0=client, 1=server */
+  uint               established : 1;     /* used by clients to determine whether to
                                              switch the destination conn id used */
+  uint               transport_params_set : 1;
 
   uint               version;             /* QUIC version of the connection */
 
@@ -96,6 +101,11 @@ struct fd_quic_conn {
      This will be used when we receive a retransmitted initial packet
      Also used when retransmitting the first initial packet */
   fd_quic_conn_id_t  orig_dst_conn_id;
+
+  /* Save original retry_source_connection_id
+   * This is used by clients to compare against the retry_source_connection_id
+   * in the transport parameters as specified in rfc 9000 7.3 */
+  fd_quic_conn_id_t  retry_src_conn_id;
 
   /* Host network endpoint
      - for server, just a copy of config->net
@@ -120,10 +130,10 @@ struct fd_quic_conn {
   uint               tx_max_datagram_sz;  /* size of maximum datagram allowed by peer */
 
   /* handshake members */
-  int                handshake_complete;  /* have we completed a successful handshake? */
-  int                handshake_done_send; /* do we need to send handshake-done to peer? */
-  int                handshake_done_ackd; /* was handshake_done ack'ed? */
-  int                hs_data_empty;       /* has all hs_data been consumed? */
+  uint               handshake_complete  : 1; /* have we completed a successful handshake? */
+  uint               handshake_done_send : 1; /* do we need to send handshake-done to peer? */
+  uint               handshake_done_ackd : 1; /* was handshake_done ack'ed? */
+  uint               hs_data_empty       : 1; /* has all hs_data been consumed? */
   fd_quic_tls_hs_t * tls_hs;
 
   /* expected handshake data offset - one per encryption level
@@ -230,6 +240,8 @@ struct fd_quic_conn {
              0x02 Client-Initiated, Unidirectional
              0x03 Server-Initiated, Unidirectional */
 
+  ulong rx_max_streams_unidir_ackd; /* value of MAX_STREAMS acked for UNIDIR */
+
   fd_quic_stream_map_t *  stream_map;           /* map stream_id -> stream */
 
   /* packet number info
@@ -254,8 +266,6 @@ struct fd_quic_conn {
   uchar   tx_buf[2048];
   uchar * tx_ptr; /* ptr to free space in tx_scratch */
   ulong   tx_sz;  /* sz remaining at ptr */
-
-  ulong   stream_tx_buf_sz; /* size of per-stream tx buffer */
 
   uint state;
   uint reason;     /* quic reason for closing. see FD_QUIC_CONN_REASON_* */
@@ -296,7 +306,6 @@ struct fd_quic_conn {
 # define FD_QUIC_CONN_FLAGS_MAX_DATA           (1u<<0u)
 # define FD_QUIC_CONN_FLAGS_CLOSE_SENT         (1u<<1u)
 # define FD_QUIC_CONN_FLAGS_MAX_STREAMS_UNIDIR (1u<<2u)
-# define FD_QUIC_CONN_FLAGS_MAX_STREAMS_BIDIR  (1u<<3u)
 # define FD_QUIC_CONN_FLAGS_PING               (1u<<4u)
 # define FD_QUIC_CONN_FLAGS_PING_SENT          (1u<<5u)
 
@@ -304,21 +313,13 @@ struct fd_quic_conn {
 
   /* max stream data per stream type */
   ulong                tx_initial_max_stream_data_uni;
-  ulong                tx_initial_max_stream_data_bidi_local;
-  ulong                tx_initial_max_stream_data_bidi_remote;
   ulong                rx_initial_max_stream_data_uni;
-  ulong                rx_initial_max_stream_data_bidi_local;
-  ulong                rx_initial_max_stream_data_bidi_remote;
 
   /* last tx packet num with max_data frame referring to this stream
      set to next_pkt_number to indicate a new max_data frame should be sent
      if we time out this packet (or possibly a later packet) we resend the frame
        and update this value */
   ulong                upd_pkt_number;
-
-  /* for timing out data and resending
-     should be at least the smoothed round-trip-time */
-  ulong                base_timeout;
 
   /* current round-trip-time */
   ulong                rtt;
@@ -333,7 +334,7 @@ struct fd_quic_conn {
   /* next connection in the free list, or in service list */
   fd_quic_conn_t *     next;
   ulong token_len;
-  uchar token[FD_QUIC_TOKEN_SZ_MAX];
+  uchar token[ FD_QUIC_RETRY_MAX_TOKEN_SZ ];
 };
 
 FD_PROTOTYPES_BEGIN
@@ -360,16 +361,6 @@ fd_quic_conn_set_context( fd_quic_conn_t * conn, void * context );
 /* get the user-defined context value from a connection */
 void *
 fd_quic_conn_get_context( fd_quic_conn_t * conn );
-
-/* fd_quic_handshake_complete checks whether the initial conn handshake
-   is complete for the given conn.  Returns 1 if a handshake has been
-   completed, 0 otherwise.  Will return 1 even if the conn has died
-   since handshake. */
-
-FD_QUIC_API FD_FN_PURE inline int
-fd_quic_handshake_complete( fd_quic_conn_t * conn ) {
-  return conn->handshake_complete;
-}
 
 
 /* set the max concurrent streams value for the specified type

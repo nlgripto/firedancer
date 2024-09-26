@@ -16,17 +16,23 @@ struct __attribute__((aligned(FD_CAPTURE_CTX_ALIGN))) fd_capture_ctx {
   int                      capture_txns; /* Capturing txns can add significant time */
 
   /* Checkpointing */
-  ulong                    checkpt_slot; /* Must be a rooted slot */
-  ulong                    checkpt_freq;
-  char const *             checkpt_path;
+  ulong                    checkpt_freq;    /* Must be a rooted slot */
+  char const *             checkpt_path;    /* Wksp checkpoint format */
+  char const *             checkpt_archive; /* Funk archive format */
 
   /* Prune */
   fd_funk_t *              pruned_funk; /* Capturing accessed accounts during execution*/
 
+  /*======== PROTOBUF ========*/
+  char const *             dump_proto_output_dir;
+  char const *             dump_proto_sig_filter;
+  ulong                    dump_proto_start_slot;
+
   /* Instruction Capture */
-  int                      dump_instructions_to_protobuf;
-  char const *             instruction_dump_signature_filter;
-  char const *             dump_instruction_output_dir;
+  int                      dump_insn_to_pb;
+
+  /* Transaction Capture */
+  int                      dump_txn_to_pb;
 };
 typedef struct fd_capture_ctx fd_capture_ctx_t;
 #define FD_CAPTURE_CTX_FOOTPRINT ( sizeof(fd_capture_ctx_t) + fd_solcap_writer_footprint() )

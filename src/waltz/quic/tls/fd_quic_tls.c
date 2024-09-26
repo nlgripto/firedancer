@@ -8,7 +8,6 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/random.h>
 #include <sys/uio.h>
 
 /* fd_tls callbacks provided by fd_quic *******************************/
@@ -101,7 +100,7 @@ fd_quic_tls_footprint( ulong handshake_cnt ) {
 static void
 fd_quic_tls_init( fd_tls_t *    tls,
                   fd_tls_sign_t signer,
-                  uchar const   cert_private_key[ static 32 ] );
+                  uchar const   cert_public_key[ static 32 ] );
 
 fd_quic_tls_t *
 fd_quic_tls_new( void *              mem,
@@ -132,9 +131,18 @@ fd_quic_tls_new( void *              mem,
 
   fd_quic_tls_t * self = (fd_quic_tls_t *)mem;
 
+  if( FD_UNLIKELY( (!cfg->alert_cb             ) |
+                   (!cfg->secret_cb            ) |
+                   (!cfg->handshake_complete_cb) |
+                   (!cfg->peer_params_cb       ) ) ) {
+    FD_LOG_WARNING(( "Missing callbacks" ));
+    return NULL;
+  }
+
   self->alert_cb              = cfg->alert_cb;
   self->secret_cb             = cfg->secret_cb;
   self->handshake_complete_cb = cfg->handshake_complete_cb;
+  self->peer_params_cb        = cfg->peer_params_cb;
   self->max_concur_handshakes = cfg->max_concur_handshakes;
 
   ulong handshakes_laddr = (ulong)mem + layout.handshakes_off;
@@ -178,7 +186,7 @@ fd_quic_tls_init( fd_tls_t *    tls,
   };
 
   /* Generate X25519 key */
-  if( FD_UNLIKELY( 32L!=getrandom( tls->kex_private_key, 32UL, 0 ) ) )
+  if( FD_UNLIKELY( !fd_rng_secure( tls->kex_private_key, 32UL ) ) )
     FD_LOG_ERR(( "getrandom failed: %s", fd_io_strerror( errno ) ));
   fd_x25519_public( tls->kex_public_key, tls->kex_private_key );
 
@@ -223,8 +231,7 @@ fd_quic_tls_hs_new( fd_quic_tls_t * quic_tls,
                     void *          context,
                     int             is_server,
                     char const *    hostname,
-                    uchar const *   transport_params_raw,
-                    ulong           transport_params_raw_sz ) {
+                    fd_quic_transport_params_t const * self_transport_params ) {
   // find a free handshake
   ulong hs_idx = 0;
   ulong hs_sz  = (ulong)quic_tls->max_concur_handshakes;
@@ -288,9 +295,7 @@ fd_quic_tls_hs_new( fd_quic_tls_t * quic_tls,
   (void)hostname;
 
   /* Set QUIC transport params */
-  FD_TEST( transport_params_raw_sz <= sizeof(self->self_transport_params) );
-  self->self_transport_params_sz = (uchar)transport_params_raw_sz;
-  fd_memcpy( self->self_transport_params, transport_params_raw, transport_params_raw_sz );
+  self->self_transport_params = *self_transport_params;
 
   /* Mark handshake as used */
   hs_used[hs_idx] = 1;
@@ -344,7 +349,6 @@ fd_quic_tls_provide_data( fd_quic_tls_hs_t * self,
     if( FD_UNLIKELY( res<0L ) ) {
       int alert = (int)-res;
       self->alert = (uint)alert;
-      FD_LOG_NOTICE(( "state %u reason %s", self->hs.base.state, fd_tls_reason_cstr( self->hs.base.reason ) ));
       self->quic_tls->alert_cb( self, self->context, alert );
       return FD_QUIC_TLS_FAILED;
     }
@@ -583,20 +587,12 @@ fd_quic_tls_pop_hs_data( fd_quic_tls_hs_t * self, uint enc_level ) {
 
 }
 
-void
-fd_quic_tls_get_peer_transport_params( fd_quic_tls_hs_t * self,
-                                       uchar const **     transport_params,
-                                       ulong *            transport_params_sz ) {
-  *transport_params     = self->peer_transport_params;
-  *transport_params_sz  = self->peer_transport_params_sz;
-}
-
 void *
 fd_quic_tls_rand( void * ctx,
                   void * buf,
                   ulong  bufsz ) {
   (void)ctx;
-  FD_TEST( (long)bufsz==getrandom( buf, bufsz, 0U ) );
+  FD_TEST( fd_rng_secure( buf, bufsz ) );
   return buf;
 }
 
@@ -606,27 +602,23 @@ fd_quic_tls_tp_self( void *  const handshake,
                      ulong   const quic_tp_bufsz ) {
   fd_quic_tls_hs_t * hs = (fd_quic_tls_hs_t *)handshake;
 
-  /* Copy fd_quic_tls's transport params to fd_tls buffer */
-  ulong sz = fd_ulong_min( quic_tp_bufsz, hs->self_transport_params_sz );
-  fd_memcpy( quic_tp, hs->self_transport_params, sz );
+  ulong encoded_sz = fd_quic_encode_transport_params( quic_tp, quic_tp_bufsz, &hs->self_transport_params );
+  if( FD_UNLIKELY( encoded_sz==FD_QUIC_ENCODE_FAIL ) ) {
+    FD_LOG_WARNING(( "fd_quic_encode_transport_params failed" ));
+    return 0UL;
+  }
 
-  /* fd_tls will gracefully fail handshake if return value exceeds bufsz */
-  return hs->self_transport_params_sz;
+  return encoded_sz;
 }
 
 void
 fd_quic_tls_tp_peer( void *        handshake,
                      uchar const * quic_tp,
                      ulong         quic_tp_sz ) {
-  fd_quic_tls_hs_t * hs = (fd_quic_tls_hs_t *)handshake;
+  /* Callback issued by fd_tls.  Bubble up callback to fd_quic_tls. */
 
-  /* Copy peer's transport params to fd_quic_tls_hs buffer */
-  if( FD_UNLIKELY( quic_tp_sz > sizeof(hs->peer_transport_params) ) ) {
-    /* TODO mark handshake as dead or report an error to fd_tls via
-            return value */
-    quic_tp_sz = 0UL;
-  }
+  fd_quic_tls_hs_t * hs       = (fd_quic_tls_hs_t *)handshake;
+  fd_quic_tls_t *    quic_tls = hs->quic_tls;
 
-  hs->peer_transport_params_sz = (uchar)quic_tp_sz;
-  fd_memcpy( hs->peer_transport_params, quic_tp, quic_tp_sz );
+  quic_tls->peer_params_cb( hs->context, quic_tp, quic_tp_sz );
 }

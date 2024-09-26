@@ -95,7 +95,7 @@
    Operators can track down an errant process stalled in the middle of
    workspace operations and blocking other processes).  Likewise
    detailed usage and metadata integrity checking and repair can be done
-   via something like ffd_wksp_ctl check / verify / rebuild / etc.
+   via something like fd_wksp_ctl check / verify / rebuild / etc.
    Practically speaking, none of this really matters if usage occurs
    predominantly during application startup / shutdown.
 
@@ -129,7 +129,7 @@
 /* FD_WKSP_ALIGN_DEFAULT gives the default alignments of a wksp
    allocation.  This is a positive integer power of two of at least 16
    (for malloc compatibility).  Additional details described in
-   FD_WKSP_ALLOC. */
+   fd_wksp_alloc. */
 
 #define FD_WKSP_ALIGN_DEFAULT (4096UL)
 
@@ -1013,6 +1013,21 @@ int
 fd_wksp_restore( fd_wksp_t *  wksp,
                  char const * path,
                  uint         seed );
+
+/* fd_wksp_restore_preview extracts key parameters from a checkpoint
+   file. These can be used with fd_funk_new for a correct restore. */
+int
+fd_wksp_restore_preview( char const * path,
+                         uint *       out_seed,
+                         ulong *      out_part_max,
+                         ulong *      out_data_max );
+
+/* fd_wksp_mprotect marks all the memory in a workspace as read-only
+   (flag==1) or read-write (flag==0). Accessing read-only memory produces
+   a seg fault. */
+
+void
+fd_wksp_mprotect( fd_wksp_t * wksp, int flag );
 
 FD_PROTOTYPES_END
 

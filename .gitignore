@@ -10,6 +10,9 @@ target/
 *.lcov
 *.profraw
 
+# GDB
+.gdb_history
+
 # Clangd
 .cache
 .clangd
@@ -46,6 +49,14 @@ deps-bundle.tar.zst
 /book/.vitepress/cache
 /book/.vitepress/dist
 /book/node_modules
+/book/bun.lockb
 
 # TVU
 testnet.toml
+mainnet.toml
+sim.toml
+backtest.toml
+testnet.sh
+mainnet.sh
+sim.sh
+backtest.sh

@@ -9,7 +9,7 @@ BENCH_EPOCH_TESTNET=508
 BENCH_SLOT_INTERNAL=0
 BENCH_EPOCH_INTERNAL=0
 
-minf_fd_frank_minimize_tool="$FIREDANCER/build/native/gcc/bin/fd_frank_ledger"
+minf_fd_frank_minimize_tool="$FIREDANCER/build/native/gcc/bin/fd_ledger"
 minf_rocksdb_min=""
 minf_rocksdb_max=""
 minf_edge=""
@@ -61,9 +61,12 @@ minimize_snapshot_frank() {
     echo "[-] rocksdb not found in $in_dir/rocksdb"
     exit 1
   fi
+
   set -x
-  "$minf_fd_frank_minimize_tool" --cmd minify --rocksdb "$in_dir/rocksdb" --minidb "$out_dir/rocksdb" --startslot $start_slot --endslot $end_slot --pages $GIGANTIC_PAGES --indexmax $INDEX_MAX
+  
+  "$minf_fd_frank_minimize_tool" --cmd minify --rocksdb "$in_dir/rocksdb" --minified-rocksdb "$out_dir/rocksdb" --start-slot $start_slot --end-slot $end_slot --page-cnt $GIGANTIC_PAGES --copy-txn-status 1
   set +x
+  
   cd "$in_dir" || exit
   cp gen* "$out_dir"
 
@@ -98,43 +101,11 @@ minimize_snapshot_solana() {
   rm -rf "$out_dir"
   cd "$in_dir" || exit
 
-  #    rm -rf ledger_tool
-  #    if [[ "$IS_VERIFY" == "true" ]]; then
-  #        set -x
-  #        "$SOLANA_LEDGER_TOOL"  verify -l . --halt-at-slot $end_slot  >& validator1.log
-  #        set +x
-  #    fi
-  #    set -x
-  #    "$SOLANA_LEDGER_TOOL"  create-snapshot -l . $start_slot
-  #    set +x
-
   rm -rf ledger_tool
-  if [[ "$IS_VERIFY" == "true" ]]; then
-    "$SOLANA_LEDGER_TOOL" verify -l . --halt-at-slot $end_slot |& tee validator2.log
-  fi
-  set -x
   "$SOLANA_LEDGER_TOOL" create-snapshot -l . $start_slot --minimized --ending-slot $end_slot
-  set +x
-
+  
   rm -rf ledger_tool
-  if [[ "$IS_VERIFY" == "true" ]]; then
-    set -x
-    "$SOLANA_LEDGER_TOOL" verify -l . --halt-at-slot $end_slot |& tee validator3.log
-    set +x
-    echo "[~] checking hash consistency across $in_dir..."
-    check_hash_consistency "$in_dir"
-  fi
-
   minimize_snapshot_frank $in_dir $out_dir $start_slot $end_slot
-
-  if [[ "$IS_VERIFY" == "true" ]]; then
-    cd "$out_dir" || exit
-    set -x
-    "$SOLANA_LEDGER_TOOL" verify -l . |& tee validator4.log
-    set +x
-    echo "[~] checking hash consistency across $in_dir and $out_dir..."
-    check_hash_consistency "$in_dir" "$out_dir"
-  fi
 }
 
 if [[ "$MODE" == "edge" ]]; then

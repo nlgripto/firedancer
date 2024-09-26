@@ -15,9 +15,6 @@
 #define WNAF_BIT_SZ 4
 #define WNAF_TBL_SZ (2*WNAF_BIT_SZ)
 
-/* Max batch size for MSM. */
-#define MSM_MAX_BATCH 32
-
 /*
  * Ser/de
  */
@@ -36,19 +33,9 @@ fd_ed25519_point_frombytes( fd_ed25519_point_t * r,
   fd_f25519_sub( u, u, fd_f25519_one ); /* u = y^2-1 */
   fd_f25519_add( v, v, fd_f25519_one ); /* v = dy^2+1 */
 
-  fd_f25519_sqrt_ratio( x, u, v );
-
-  fd_f25519_t vxx  [1];
-  fd_f25519_t check[1];
-  fd_f25519_sqr( vxx,   x      );
-  fd_f25519_mul( vxx,   vxx, v );
-  fd_f25519_sub( check, vxx, u );       /* vx^2-u */
-  if( fd_f25519_is_nonzero( check ) ) { /* unclear prob */
-    fd_f25519_add( check, vxx, u );     /* vx^2+u */
-    if( FD_UNLIKELY( fd_f25519_is_nonzero( check ) ) ) {
-      return NULL;
-    }
-    fd_f25519_mul( x, x, fd_f25519_sqrtm1 );
+  int was_square = fd_f25519_sqrt_ratio( x, u, v );
+  if( FD_UNLIKELY( !was_square ) ) {
+    return NULL;
   }
 
   if( fd_f25519_sgn(x)!=expected_x_sign ) { /* 50% prob */
@@ -172,8 +159,8 @@ fd_ed25519_multi_scalar_mul_with_opts( fd_ed25519_point_t *     r,
                                        fd_ed25519_point_t const a[], /* sz */
                                        ulong const              sz,
                                        ulong const              base_sz ) {
-  short nslide[MSM_MAX_BATCH][256];
-  fd_ed25519_point_t ai[MSM_MAX_BATCH][WNAF_TBL_SZ]; /* A,3A,5A,7A,9A,11A,13A,15A */
+  short nslide[FD_BALLET_CURVE25519_MSM_BATCH_SZ][256];
+  fd_ed25519_point_t ai[FD_BALLET_CURVE25519_MSM_BATCH_SZ][WNAF_TBL_SZ]; /* A,3A,5A,7A,9A,11A,13A,15A */
   fd_ed25519_point_t a2[1];                          /* 2A (temp) */
   fd_ed25519_point_t t[1];                           /* temp */
 
@@ -228,8 +215,8 @@ fd_ed25519_multi_scalar_mul( fd_ed25519_point_t *     r,
   fd_ed25519_point_t h[1];
   fd_ed25519_point_set_zero( r );
 
-  for( ulong i=0; i<sz; i+=MSM_MAX_BATCH ) {
-    ulong batch_sz = fd_ulong_min(sz-i, MSM_MAX_BATCH);
+  for( ulong i=0; i<sz; i+=FD_BALLET_CURVE25519_MSM_BATCH_SZ ) {
+    ulong batch_sz = fd_ulong_min(sz-i, FD_BALLET_CURVE25519_MSM_BATCH_SZ);
 
     fd_ed25519_multi_scalar_mul_with_opts( h, &n[ 32*i ], &a[ i ], batch_sz, 0 );
     fd_ed25519_point_add( r, r, h );
@@ -243,7 +230,7 @@ fd_ed25519_multi_scalar_mul_base( fd_ed25519_point_t *     r,
                                   uchar const              n[], /* sz * 32 */
                                   fd_ed25519_point_t const a[], /* sz */
                                   ulong const              sz ) {
-  if (sz > MSM_MAX_BATCH) {
+  if (sz > FD_BALLET_CURVE25519_MSM_BATCH_SZ) {
     return NULL;
   }
   return fd_ed25519_multi_scalar_mul_with_opts( r, n, a, sz, 1 );

@@ -3,6 +3,7 @@
    shared memory data structures.  Thus runs without special permissions
    or heap. */
 
+#include "fd_xsk.h"
 #include "fd_xsk_private.h"
 #include "fd_xsk_aio_private.h"
 #include "../../util/fd_util.h"
@@ -135,40 +136,30 @@ test_xsk( void ) {
   xsk->magic++;
 
   FD_TEST( NULL==fd_xsk_join  ( shxsk ) );
-  FD_TEST( NULL==fd_xsk_bind  ( shxsk, "app",  "lo", 0U ) );
   FD_TEST( NULL==fd_xsk_delete( shxsk ) );
 
   xsk->magic--;
 
+  xsk = fd_xsk_join( shxsk );
+  FD_TEST( xsk );
+
   /* Invalid bind params */
 
-  FD_TEST( NULL==fd_xsk_bind( NULL,  "app", "lo", 0U ) ); /* NULL shxsk    */
-  FD_TEST( NULL==fd_xsk_bind( shxsk, NULL,  "lo", 0U ) ); /* NULL app_name */
-  FD_TEST( NULL==fd_xsk_bind( shxsk, "app", NULL, 0U ) ); /* NULL ifname   */
-
-  FD_TEST( NULL==fd_xsk_bind( shxsk,
-    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    "lo", 0U ) ); /* oversz app_name */
-  FD_TEST( NULL==fd_xsk_bind( shxsk, "app", "AAAAAAAAAAAAAAAA", 0U ) ); /* oversz ifname */
-
-  FD_TEST( NULL==fd_xsk_bind( (void *)((ulong)shxsk+1UL), "app", "lo", 0U ) ); /* unalign shxsk */
-
-  /* Mock join */
-
-  FD_TEST( fd_xsk_bind( shxsk, "app", "lo", 0U ) );
-
-  FD_TEST( strcmp( fd_xsk_app_name( xsk ), "app" )==0  );
-  FD_TEST( strcmp( fd_xsk_ifname  ( xsk ), "lo"  )==0  );
-  FD_TEST(         fd_xsk_ifqueue ( xsk )         ==0  );
+  FD_TEST( NULL==fd_xsk_init( NULL, 1U, 0U, 0U ) ); /* NULL xsk    */
 
   /* Ensure fields are properly null-initialized */
 
   FD_TEST( fd_xsk_umem_laddr( xsk )==NULL );
   FD_TEST( fd_xsk_fd        ( xsk )==-1   );
   FD_TEST( fd_xsk_ifidx     ( xsk )==0U   );
+  FD_TEST( fd_xsk_ifqueue   ( xsk )==0U   );
+
+  /* Mock join */
+
+  xsk->if_idx      = 0x41414143U;
+  xsk->if_queue_id = 0x42424245U;
+  FD_TEST( fd_xsk_ifidx   ( xsk )==0x41414143U );
+  FD_TEST( fd_xsk_ifqueue ( xsk )==0x42424245U );
 
   /* Get parameters */
 

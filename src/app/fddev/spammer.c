@@ -23,8 +23,6 @@ spammer_cmd_perm( args_t *         args,
     if( FD_LIKELY( STAGES[ i ] ) ) {
       if( FD_UNLIKELY( !strcmp( STAGES[ i ]->name, "hugetlbfs" ) ) )
         configure_args.configure.stages[ 0 ] = STAGES[ i ];
-      if( FD_UNLIKELY( !strcmp( STAGES[ i ]->name, "workspace" ) ) )
-        configure_args.configure.stages[ 1 ] = STAGES[ i ];
     }
   }
   configure_args.configure.stages[ 2 ] = NULL;
@@ -75,8 +73,11 @@ spammer_cmd_fn( args_t *         args,
   if( FD_UNLIKELY( !args->spammer.rpc_ip ) )
     args->spammer.rpc_ip      = config->tiles.net.ip_addr;
 
-  if( FD_UNLIKELY( !args->spammer.tpu_port ) )
-    args->spammer.tpu_port    = config->tiles.quic.regular_transaction_listen_port;
+  if( FD_UNLIKELY( !args->spammer.tpu_port ) ) {
+    args->spammer.tpu_port    = fd_ushort_if( args->spammer.no_quic,
+                 config->tiles.quic.regular_transaction_listen_port,
+                 config->tiles.quic.quic_transaction_listen_port );
+  }
 
   if( FD_UNLIKELY( !args->spammer.rpc_port ) )
     args->spammer.rpc_port    = config->rpc.port;
@@ -96,7 +97,7 @@ spammer_cmd_fn( args_t *         args,
   if( FD_UNLIKELY( !args->spammer.connections ) )
     args->spammer.connections = config->layout.quic_tile_count;
 
-  fd_topo_t topo[ 1 ] = { fd_topob_new( config->name ) };
+  fd_topo_t * topo = { fd_topob_new( &config->topo, config->name ) };
   add_bench_topo( topo,
                   args->spammer.affinity,
                   args->spammer.benchg,
@@ -117,12 +118,12 @@ spammer_cmd_fn( args_t *         args,
     if( FD_LIKELY( STAGES[ i ] ) ) {
       if( FD_UNLIKELY( !strcmp( STAGES[ i ]->name, "hugetlbfs" ) ) )
         configure_args.configure.stages[ 0 ] = STAGES[ i ];
-      if( FD_UNLIKELY( !strcmp( STAGES[ i ]->name, "workspace" ) ) )
-        configure_args.configure.stages[ 1 ] = STAGES[ i ];
     }
   }
   configure_args.configure.stages[ 2 ] = NULL;
   configure_cmd_fn( &configure_args, config );
+
+  run_firedancer_init( config, 1 );
 
   // Do we need a sandbox?
 

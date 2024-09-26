@@ -25,11 +25,8 @@ $(call add-objs,fd_pubkey_utils,fd_flamenco)
 
 $(call add-hdrs,fd_rent_lists.h)
 
-$(call add-hdrs,fd_runtime.h fd_runtime_err.h)
-$(call add-objs,fd_runtime,fd_flamenco)
-
-$(call add-hdrs,fd_snapshot_loader.h)
-$(call add-objs,fd_snapshot_loader,fd_flamenco)
+$(call add-hdrs,fd_runtime.h fd_runtime_init.h fd_runtime_err.h)
+$(call add-objs,fd_runtime fd_runtime_init,fd_flamenco)
 endif
 
 $(call add-hdrs,fd_system_ids.h)
@@ -40,4 +37,13 @@ $(call run-unit-test,test_system_ids,)
 ifdef FD_HAS_ROCKSDB
 $(call add-hdrs,fd_rocksdb.h)
 $(call add-objs,fd_rocksdb,fd_flamenco)
+endif
+
+ifdef FD_HAS_ATOMIC
+$(call add-hdrs,fd_txncache.h)
+$(call add-objs,fd_txncache,fd_flamenco)
+ifdef FD_HAS_HOSTED
+$(call make-unit-test,test_txncache,test_txncache,fd_flamenco fd_util)
+$(call run-unit-test,test_txncache,)
+endif
 endif

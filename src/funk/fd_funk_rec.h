@@ -37,12 +37,13 @@
 
 /* A fd_funk_rec_t describes a funk record. */
 
-struct fd_funk_rec {
+struct __attribute__((aligned(FD_FUNK_REC_ALIGN))) fd_funk_rec {
 
   /* These fields are managed by the funk's rec_map */
 
   fd_funk_xid_key_pair_t pair;     /* Transaction id and record key pair */
   ulong                  map_next; /* Internal use by map */
+  ulong                  map_hash; /* Internal use by map */
 
   /* These fields are managed by funk.  TODO: Consider using record
      index compression here (much more debatable than in txn itself). */
@@ -66,12 +67,16 @@ struct fd_funk_rec {
   ulong next_part_idx;  /* Record map index of next record in partition chain */
   uint  part;           /* Partition number, FD_FUNK_PART_NULL if none */
 
+  int   val_no_free; /* If set, do not call alloc_free on the value */
+
   /* Padding to FD_FUNK_REC_ALIGN here (TODO: consider using self index
      in the structures to accelerate indexing computations if padding
      permits as this structure is currently has 8 bytes of padding) */
 };
 
 typedef struct fd_funk_rec fd_funk_rec_t;
+
+FD_STATIC_ASSERT( sizeof(fd_funk_rec_t) == 5U*32U, record size is wrong );
 
 /* fd_funk_rec_map allows for indexing records by their (xid,key) pair.
    It is used to store all records of the last published transaction and
@@ -89,8 +94,10 @@ typedef struct fd_funk_rec fd_funk_rec_t;
 #define MAP_KEY_HASH(k0,seed) fd_funk_xid_key_pair_hash((k0),(seed))
 #define MAP_KEY_COPY(kd,ks)   fd_funk_xid_key_pair_copy((kd),(ks))
 #define MAP_NEXT              map_next
+#define MAP_HASH              map_hash
 #define MAP_MAGIC             (0xf173da2ce77ecdb0UL) /* Firedancer rec db version 0 */
 #define MAP_IMPL_STYLE        1
+#define MAP_MEMOIZE           1
 #include "../util/tmpl/fd_map_giant.c"
 
 FD_PROTOTYPES_BEGIN
@@ -175,12 +182,19 @@ fd_funk_rec_query_global( fd_funk_t *               funk,
    allocated by the given valloc and should be freed with the same
    valloc. NULL is returned if the query fails. The query is always
    against the root transaction. */
-  
+
 FD_FN_PURE void *
 fd_funk_rec_query_safe( fd_funk_t *               funk,
                         fd_funk_rec_key_t const * key,
                         fd_valloc_t               valloc,
                         ulong *                   result_len );
+
+FD_FN_PURE void *
+fd_funk_rec_query_xid_safe( fd_funk_t *               funk,
+                            fd_funk_rec_key_t const * key,
+                            fd_funk_txn_xid_t const * xid,
+                            fd_valloc_t               valloc,
+                            ulong *                   result_len );
 
 /* fd_funk_rec_test tests the record pointed to by rec.  Returns
    FD_FUNK_SUCCESS (0) if rec appears to be a live unfrozen record in

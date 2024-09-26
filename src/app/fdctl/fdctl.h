@@ -13,7 +13,7 @@
 extern fd_topo_run_tile_t * TILES[];
 
 
-#define CONFIGURE_STAGE_COUNT 11
+#define CONFIGURE_STAGE_COUNT 10
 struct configure_stage;
 
 typedef union {
@@ -30,7 +30,10 @@ typedef union {
     uint seed;
     double ns_per_tic;
     int drain_output_fd;
+    int with_bench;
+    int with_sankey;
   } monitor;
+
   struct {
     int                      command;
     struct configure_stage * stages[ CONFIGURE_STAGE_COUNT ];
@@ -40,7 +43,8 @@ typedef union {
     int  parent_pipefd;
     int  monitor;
     int  no_configure;
-    int  no_solana_labs;
+    int  no_init_workspaces;
+    int  no_agave;
     char debug_tile[ 32 ];
   } dev;
 
@@ -62,7 +66,7 @@ typedef union {
   } txn;
 
   struct {
-    char link_name[ 13UL ];
+    char link_name[ 64UL ];
     char pcap_path[ 256UL ];
   } dump;
 
@@ -110,7 +114,7 @@ fdctl_obj_loose( fd_topo_t const *     topo,
 fd_topo_run_tile_t
 fdctl_tile_run( fd_topo_tile_t * tile );
 
-#define ACTIONS_CNT (10UL)
+#define ACTIONS_CNT (11UL)
 extern action_t ACTIONS[ ACTIONS_CNT ];
 
 void fdctl_boot( int *        pargc,
@@ -158,8 +162,8 @@ run1_cmd_fn( args_t *         args,
              config_t * const config );
 
 void
-run_solana_cmd_fn( args_t *         args,
-                   config_t * const config );
+run_agave_cmd_fn( args_t *         args,
+                  config_t * const config );
 
 void
 monitor_cmd_args( int *    pargc,
@@ -197,5 +201,9 @@ spy_cmd_fn( args_t *         args,
 void
 help_cmd_fn( args_t *         args,
              config_t * const config );
+
+void
+version_cmd_fn( args_t *         args,
+                config_t * const config );
 
 #endif /* HEADER_fd_src_app_fdctl_fdctl_h */

@@ -1,7 +1,8 @@
 #ifndef HEADER_fd_src_flamenco_runtime_fd_sysvar_fees_h
 #define HEADER_fd_src_flamenco_runtime_fd_sysvar_fees_h
 
-#include "../fd_executor.h"
+#include "../../fd_flamenco_base.h"
+#include "../../types/fd_types.h"
 
 /* The fees sysvar contains the fee calculator for the current slot. */
 
@@ -15,9 +16,6 @@ fd_sysvar_fees_init( fd_exec_slot_ctx_t * slot_ctx );
 fd_sysvar_fees_t *
 fd_sysvar_fees_read( fd_sysvar_fees_t *   result,
                      fd_exec_slot_ctx_t * slot_ctx );
-
-void
-fd_sysvar_fees_update( fd_exec_slot_ctx_t * slot_ctx );
 
 void
 fd_sysvar_fees_new_derived( fd_exec_slot_ctx_t *   slot_ctx,

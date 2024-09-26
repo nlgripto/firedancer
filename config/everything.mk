@@ -75,14 +75,14 @@ clean:
 	#######################################################################
 	# Cleaning $(OBJDIR)
 	#######################################################################
-	$(RMDIR) $(OBJDIR) && $(RMDIR) target && $(RMDIR) solana/target && \
+	$(RMDIR) $(OBJDIR) && $(RMDIR) target && $(RMDIR) agave/target && \
 $(SCRUB)
 
 distclean:
 	#######################################################################
 	# Cleaning $(BASEDIR)
 	#######################################################################
-	$(RMDIR) $(BASEDIR) && $(RMDIR) target && $(RMDIR) solana/target && \
+	$(RMDIR) $(BASEDIR) && $(RMDIR) target && $(RMDIR) agave/target && \
 $(SCRUB)
 
 run-unit-test:
@@ -137,7 +137,7 @@ add-asms = $(eval $(call _add-asms,$(1),$(2)))
 
 define _add-hdrs
 
-include: $(foreach hdr,$(1),$(patsubst $(OBJDIR)/src/%,$(OBJDIR)/include/%,$(OBJDIR)/$(MKPATH)$(hdr)))
+include: $(foreach hdr,$(1),$(patsubst $(OBJDIR)/src/%,$(OBJDIR)/include/firedancer/%,$(OBJDIR)/$(MKPATH)$(hdr)))
 
 endef
 
@@ -207,7 +207,7 @@ $(OBJDIR)/$(5)/$(1): $(foreach obj,$(2),$(patsubst $(OBJDIR)/src/%,$(OBJDIR)/obj
 	# Creating $(5) $$@ from $$^
 	#######################################################################
 	$(MKDIR) $$(dir $$@) && \
-$(LD) -L$(OBJDIR)/lib $(foreach obj,$(2),$(patsubst $(OBJDIR)/src/%,$(OBJDIR)/obj/%,$(OBJDIR)/$(MKPATH)$(obj).o)) -Wl,--start-group $(foreach lib,$(3),-l$(lib)) -Wl,--end-group $(6) $(LDFLAGS) -o $$@
+$(LD) -L$(OBJDIR)/lib $(foreach obj,$(2),$(patsubst $(OBJDIR)/src/%,$(OBJDIR)/obj/%,$(OBJDIR)/$(MKPATH)$(obj).o)) $(foreach lib,$(3),-l$(lib)) $(6) $(LDFLAGS) -o $$@
 
 $(4): $(OBJDIR)/$(5)/$(1)
 
@@ -238,9 +238,9 @@ endif
 
 define _fuzz-test
 
-$(eval $(call _make-exe,$(1)/$(1),$(2),$(3),fuzz-test,fuzz-test,$(LDFLAGS_FUZZ) $(FUZZ_EXTRA)))
+$(eval $(call _make-exe,$(1),$(2),$(3),fuzz-test,fuzz-test,$(LDFLAGS_FUZZ) $(FUZZ_EXTRA)))
 
-$(OBJDIR)/fuzz-test/$(1)/$(1): $(FUZZ_EXTRA)
+$(OBJDIR)/fuzz-test/$(1): $(FUZZ_EXTRA)
 
 .PHONY: $(1)_unit
 $(1)_unit:
@@ -248,7 +248,7 @@ $(1)_unit:
 $(MKDIR) -p "$(OBJDIR)/cov/raw" && \
 FD_LOG_PATH="" \
 LLVM_PROFILE_FILE="$(OBJDIR)/cov/raw/$(1)_unit.profraw" \
-$(FIND) corpus/$(1) -type f -exec $(OBJDIR)/fuzz-test/$(1)/$(1) $(FUZZFLAGS) {} +
+$(FIND) corpus/$(1) -type f -exec $(OBJDIR)/fuzz-test/$(1) $(FUZZFLAGS) {} +
 
 .PHONY: $(1)_run
 $(1)_run:
@@ -256,7 +256,7 @@ $(1)_run:
 $(MKDIR) -p "$(OBJDIR)/cov/raw" && \
 FD_LOG_PATH="" \
 LLVM_PROFILE_FILE="$(OBJDIR)/cov/raw/$(1)_run.profraw" \
-$(OBJDIR)/fuzz-test/$(1)/$(1) -artifact_prefix=corpus/$(1)/ $(FUZZFLAGS) corpus/$(1)/explore corpus/$(1)
+$(OBJDIR)/fuzz-test/$(1) -artifact_prefix=corpus/$(1)/ $(FUZZFLAGS) corpus/$(1)/explore corpus/$(1)
 
 run-fuzz-test: $(1)_unit
 
@@ -267,7 +267,7 @@ make-bin-rust  = $(eval $(call _make-exe,$(1),$(2),$(3),rust,bin,$(4)))
 make-shared    = $(eval $(call _make-exe,$(1),$(2),$(3),lib,lib,-shared $(4)))
 make-unit-test = $(eval $(call _make-exe,$(1),$(2),$(3),unit-test,unit-test,$(4)))
 run-unit-test  = $(eval $(call _run-unit-test,$(1)))
-make-integration-test = $(eval $(call _make-exe,$(1),$(2),$(3),integration-test,integration-test))
+make-integration-test = $(eval $(call _make-exe,$(1),$(2),$(3),integration-test,integration-test,$(4)))
 run-integration-test  = $(eval $(call _run-integration-test,$(1)))
 make-fuzz-test = $(eval $(call _fuzz-test,$(1),$(2),$(3)))
 
@@ -366,7 +366,7 @@ $(RM) $@ && \
 $(AR) $(ARFLAGS) $@ $^ && \
 $(RANLIB)  $@
 
-$(OBJDIR)/include/% : src/%
+$(OBJDIR)/include/firedancer/% : src/%
 	#######################################################################
 	# Copying header $^ to $@
 	#######################################################################
@@ -422,7 +422,16 @@ run-script-test: bin unit-test
 OBJDIR=$(OBJDIR) \
 MACHINE=$(MACHINE) \
 LLVM_PROFILE_FILE="$(OBJDIR)/cov/raw/script_test-%p.profraw" \
+LOG_PATH="$(OBJDIR)/log/fd-script-test-report" \
 contrib/test/run_script_tests.sh
+
+run-test-vectors: bin unit-test
+	mkdir -p "$(OBJDIR)/cov/raw" && \
+OBJDIR=$(OBJDIR) \
+MACHINE=$(MACHINE) \
+LLVM_PROFILE_FILE="$(OBJDIR)/cov/raw/test_vectors-%p.profraw" \
+LOG_PATH="$(OBJDIR)/log/fd-test-vectors-report" \
+contrib/test/run_test_vectors.sh
 
 seccomp-policies:
 	$(FIND) . -name '*.seccomppolicy' -exec $(PYTHON) contrib/codegen/generate_filters.py {} \;
@@ -450,7 +459,7 @@ seccomp-policies:
 #
 # 1. For each machine
 # 1.1. Compile with llvm-cov
-# 1.2. Run tests (This Makefile sets $LLVM_PROFILE_DATA appropriately for each kind of test)
+# 1.2. Run tests (This Makefile sets $LLVM_PROFILE_FILE appropriately for each kind of test)
 # 1.3. Merge raw profiles from test runs into a per-machine profile using 'llvm-profdata merge'
 # 1.4. Merge all machine objects into a thin .ar file
 # 1.5. Generate lcov tracefile from coverage mappings (step 1.4) and indexed profile data (step 1.3)

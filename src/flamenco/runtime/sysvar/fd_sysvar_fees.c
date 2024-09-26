@@ -1,5 +1,4 @@
 #include "fd_sysvar_fees.h"
-#include "../../types/fd_types.h"
 #include "fd_sysvar.h"
 #include "../fd_system_ids.h"
 #include "../context/fd_exec_epoch_ctx.h"
@@ -7,16 +6,16 @@
 
 static void
 write_fees( fd_exec_slot_ctx_t* slot_ctx, fd_sysvar_fees_t* fees ) {
-  ulong          sz = fd_sysvar_fees_size( fees );
-  unsigned char *enc = fd_alloca( 1, sz );
-  memset( enc, 0, sz );
+  ulong sz = fd_sysvar_fees_size( fees );
+  uchar enc[sz];
+  fd_memset( enc, 0, sz );
   fd_bincode_encode_ctx_t ctx;
   ctx.data = enc;
   ctx.dataend = enc + sz;
   if ( fd_sysvar_fees_encode( fees, &ctx ) )
     FD_LOG_ERR(("fd_sysvar_fees_encode failed"));
 
-  fd_sysvar_set( slot_ctx, fd_sysvar_owner_id.key, &fd_sysvar_fees_id, enc, sz, slot_ctx->slot_bank.slot, 0UL );
+  fd_sysvar_set( slot_ctx, fd_sysvar_owner_id.key, &fd_sysvar_fees_id, enc, sz, slot_ctx->slot_bank.slot );
 }
 
 fd_sysvar_fees_t *
@@ -87,6 +86,12 @@ fd_sysvar_fees_new_derived(
     lamports_per_signature = base_fee_rate_governor.target_lamports_per_signature;
     me.min_lamports_per_signature = me.target_lamports_per_signature;
     me.max_lamports_per_signature = me.target_lamports_per_signature;
+  }
+
+  if( FD_UNLIKELY( slot_ctx->slot_bank.lamports_per_signature==0UL ) ) {
+    slot_ctx->prev_lamports_per_signature = lamports_per_signature;
+  } else {
+    slot_ctx->prev_lamports_per_signature = slot_ctx->slot_bank.lamports_per_signature;
   }
 
   slot_ctx->slot_bank.lamports_per_signature = lamports_per_signature;

@@ -1,7 +1,9 @@
 #include "fd_sysvar_slot_hashes.h"
-#include "../../../flamenco/types/fd_types.h"
 #include "fd_sysvar.h"
+#include "../fd_acc_mgr.h"
+#include "../fd_borrowed_account.h"
 #include "../fd_system_ids.h"
+#include "../context/fd_exec_slot_ctx.h"
 
 /* https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/sdk/program/src/slot_hashes.rs#L11 */
 const ulong slot_hashes_max_entries = 512;
@@ -13,15 +15,15 @@ void write_slot_hashes( fd_exec_slot_ctx_t * slot_ctx, fd_slot_hashes_t* slot_ha
   ulong sz = fd_slot_hashes_size( slot_hashes );
   if (sz < slot_hashes_min_account_size)
     sz = slot_hashes_min_account_size;
-  unsigned char *enc = fd_alloca( 1, sz );
-  memset( enc, 0, sz );
+  uchar enc[sz];
+  fd_memset( enc, 0, sz );
   fd_bincode_encode_ctx_t ctx;
   ctx.data = enc;
   ctx.dataend = enc + sz;
   if ( fd_slot_hashes_encode( slot_hashes, &ctx ) )
     FD_LOG_ERR(("fd_slot_hashes_encode failed"));
 
-  fd_sysvar_set( slot_ctx, fd_sysvar_owner_id.key, &fd_sysvar_slot_hashes_id, enc, sz, slot_ctx->slot_bank.slot, 0UL );
+  fd_sysvar_set( slot_ctx, fd_sysvar_owner_id.key, &fd_sysvar_slot_hashes_id, enc, sz, slot_ctx->slot_bank.slot );
 }
 
 //void fd_sysvar_slot_hashes_init( fd_slot_ctx_ctx_t* slot_ctx ) {
@@ -31,12 +33,13 @@ void write_slot_hashes( fd_exec_slot_ctx_t * slot_ctx, fd_slot_hashes_t* slot_ha
 //}
 
 /* https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/sdk/program/src/slot_hashes.rs#L34 */
-void fd_sysvar_slot_hashes_update( fd_exec_slot_ctx_t * slot_ctx ) {
+void
+fd_sysvar_slot_hashes_update( fd_exec_slot_ctx_t * slot_ctx ) {
   FD_SCRATCH_SCOPE_BEGIN {
 
     fd_slot_hashes_t slot_hashes;
     if( !fd_sysvar_slot_hashes_read( &slot_hashes, slot_ctx ) ) {
-      slot_hashes.hashes = deq_fd_slot_hash_t_alloc( slot_ctx->valloc );
+      slot_hashes.hashes = deq_fd_slot_hash_t_alloc( slot_ctx->valloc, FD_SYSVAR_SLOT_HASHES_CAP );
       FD_TEST( slot_hashes.hashes );
     }
 

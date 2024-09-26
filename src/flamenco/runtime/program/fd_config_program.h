@@ -9,7 +9,8 @@
 
    Address: Config1111111111111111111111111111111111111 */
 
-#include "../fd_runtime.h"
+#include "../../fd_flamenco_base.h"
+#include "../context/fd_exec_instr_ctx.h"
 
 FD_PROTOTYPES_BEGIN
 
@@ -17,7 +18,7 @@ FD_PROTOTYPES_BEGIN
    for the config program. */
 
 int
-fd_config_program_execute( fd_exec_instr_ctx_t ctx ) ;
+fd_config_program_execute( fd_exec_instr_ctx_t * ctx ) ;
 
 FD_PROTOTYPES_END
 

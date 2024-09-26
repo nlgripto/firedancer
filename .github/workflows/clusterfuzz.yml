@@ -5,6 +5,7 @@ on:
   pull_request:
 jobs:
   clusterfuzz-publish:
+    timeout-minutes: 30
     environment:
       name: clusterfuzz
       url: 'https://isol-clusterfuzz.appspot.com/'
@@ -27,6 +28,8 @@ jobs:
       EXTRAS: fuzz asan ubsan
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       # - uses: ./.github/actions/hugepages
       - uses: ./.github/actions/deps
@@ -36,48 +39,63 @@ jobs:
       - uses: asymmetric-research/clusterfuzz-fuzzbot-builder@main
         name: Build fuzz tests
         with:
-          command: make -j -Otarget fuzz-test
+          command: make -j -Otarget fuzz-test lib
 
-      - name: List Artifacts
+      - name: ClusterFuzz directory structure
         run: |
           ls ${{ matrix.artifact_dir }}/fuzz-test
+          ls ${{ matrix.artifact_dir }}/lib
+          mkdir cf-dist
+          find build/clang-fuzz/fuzz-test -maxdepth 1 -executable -print | while read -r BIN_PATH; do TARGET=$(basename "$BIN_PATH"); mkdir cf-dist/$TARGET && mv $BIN_PATH cf-dist/$TARGET/$TARGET; done
 
       - uses: asymmetric-research/firedancer-clusterfuzz-action@main
         name: Upload fuzz targets to ClusterFuzz
         with:
           bucket-name: firedancer-builds.isol-clusterfuzz.appspot.com
-          artifact-dir: ${{ matrix.artifact_dir }}/fuzz-test
+          artifact-dir: cf-dist
           object-prefix: main/libfuzzer/${{ matrix.qualifier }}/firedancer
           project-id: isol-clusterfuzz
           qualifier: ${{ matrix.qualifier }}
           service-account-credentials: ${{ secrets.FUZZ_SERVICE_ACCT_JSON_BUNDLE }}
 
-      - name: Find the tmpdir containing our binaries and rewritten-rpath libs
-        id: find-fuzzdir
-        run: |
-          FD_DIR=$(find /tmp/ | grep fdfuzz | head -n 1)
-          mkdir -p ./build/lib
-          cp $FD_DIR/lib/*.so* ./build/lib/
-      - uses: actions/upload-artifact@v4
-        name: Upload harness binaries and libs to GHA Artifacts
-        with:
-          name: ${{ github.run_id }}-${{ matrix.machine }}
-          path: ./build/
-          retention-days: 1
-
-
-  fuzzcorp-publish:
-    needs: clusterfuzz-publish
+  solfuzz-publish:
+    timeout-minutes: 30
     runs-on:
-      ubuntu-latest
+      group: github-v1
+    env:
+      MACHINE: linux_clang_haswell
+      OBJ_DIR: build/linux/clang/haswell
+      EXTRAS: fuzz asan
     steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-    - uses: actions/checkout@v4
-    - uses: ./.github/actions/fc
-      with:
-        SKID: ${{ secrets.AWS_SKID }}
-        AKID:  ${{ secrets.AWS_AKID }}
-        previous_action_outputs: |
-          ${{ github.run_id }}-linux_clang_haswell
-          ${{ github.run_id }}-linux_clang_icelake
+      - uses: ./.github/actions/hugepages
+      - uses: ./.github/actions/deps
 
+      - run: sudo apt update && sudo apt install -y zip
+
+      - uses: asymmetric-research/clusterfuzz-fuzzbot-builder@main
+        name: Build fuzz tests
+        with:
+          command: make -j -Otarget fuzz-test lib
+
+      - name: List Artifacts
+        run: |
+          ls ${{ env.OBJ_DIR }}/fuzz-test
+          ls ${{ env.OBJ_DIR }}/lib
+
+      - name: upload so artifact
+        uses: actions/upload-artifact@v4
+        with:
+          path: ${{ env.OBJ_DIR }}/lib/libfd_exec_sol_compat.so
+          name: libfd_exec_sol_compat
+          retention-days: 14
+      
+      - name: upload stubbed so artifact
+        uses: actions/upload-artifact@v4
+        with:
+          path: ${{ env.OBJ_DIR }}/lib/libfd_exec_sol_compat_stubbed.so
+          name: libfd_exec_sol_compat_stubbed
+          retention-days: 14

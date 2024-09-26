@@ -1,10 +1,15 @@
 #ifndef HEADER_fd_src_flamenco_snapshot_fd_snapshot_restore_h
 #define HEADER_fd_src_flamenco_snapshot_fd_snapshot_restore_h
 
-/* fd_snapshot_restore.h provides APIs for restoring an execution
-   context from the individual snapshot files.  (The outer layers, such
-   as the TAR stream and Zstandard compression, are managed by
-   fd_snapshot_load).
+/* fd_snapshot_restore.h provides APIs for the downstream part of the
+   snapshot loading pipeline.
+
+     read => unzstd => untar => restore
+                                ^^^^^^^
+
+   This header provides APIs for restoring an execution context from the
+   individual snapshot files.  (The outer layers, such as the TAR stream
+   and Zstandard compression, are managed by fd_snapshot_load).
 
    The snapshot format contains complex data structures without size
    restrictions.  This API will effectively make an unbounded amount of
@@ -21,12 +26,6 @@
 
 struct fd_snapshot_restore;
 typedef struct fd_snapshot_restore fd_snapshot_restore_t;
-
-/* FD_SNAPSHOT_RESTORE_BUFSZ is the default read buffer size while
-   loading data from a snapshot.  This is temporarily exceeded while
-   loading the snapshot manifest. */
-
-#define FD_SNAPSHOT_RESTORE_BUFSZ (1UL<<20)  /* 1 MiB */
 
 /* fd_snapshot_restore_cb_manifest_fn_t is a callback that provides the
    user of snapshot restore with the deserialized manifest.  The caller
@@ -45,6 +44,18 @@ typedef int
 (* fd_snapshot_restore_cb_manifest_fn_t)( void *                 ctx,
                                           fd_solana_manifest_t * manifest );
 
+/* fd_snapshot_restore_cb_status_cache_fn_t is a callback that provides the
+   user of snapshot restore with the deserialized slot deltas.  The caller
+   may copy data from the deltas. Any leftover fields will be freed on return.
+
+   ctx is the pointer provided to fd_snapshot_restore_set_cb_status_cache.
+   Returns 0 on success.  Non-zero return value implies failure.  The
+   return value gets forwarded to the original caller of the restore
+   API. */
+typedef int
+(* fd_snapshot_restore_cb_status_cache_fn_t)( void *                  ctx,
+                                              fd_bank_slot_deltas_t * slot_deltas );
+
 FD_PROTOTYPES_BEGIN
 
 /* fd_snapshot_restore_{align,footprint} return required memory region
@@ -61,17 +72,18 @@ fd_snapshot_restore_footprint( void );
    Returns qualified handle to object given restore object on success.
 
    valloc is a memory allocator that outlives the snapshot restore
-   object.  The restore object promises to not do more than valloc_max
-   heap allocations (frees do not reset this number to also account for
-   heap fragmentation).  valloc_max must be at least of size
-   FD_SNAPSHOT_RESTORE_BUFSZ.  The recommended value for mainnet
-   snapshots is 2 GiB as of 2024-02-05.  (But unfortunately, this
-   continues to grow without bounds)
+   object.  This allocator is used to buffer the serialized snapshot
+   manifest (ca ~500 MB) and account data.
 
    The snapshot manifest is provided to the callback function.  This
-   callback is invoked up to one time per restore object.  cb_ctx is an
+   callback is invoked up to one time per restore object.  cb_manifest_ctx is an
    opaque pointer that is passed to the callback (and ignored by this
-   API otherwise).  It is valid to provide a NULL cb_ctx.
+   API otherwise).  It is valid to provide a NULL cb_manifest_ctx.
+
+   The status cache is also restored using the provided callback if
+   a valid callback method is provided. It is valid to provide a NULL
+   callback for testing purposes as of now, and the status_cache_ctx
+   can also be NULL.
 
    Accounts are restored into the given account manager and funk
    transaction.  (Note that the restore process will leave behind
@@ -86,8 +98,9 @@ fd_snapshot_restore_new( void *                               mem,
                          fd_acc_mgr_t *                       acc_mgr,
                          fd_funk_txn_t *                      txn,
                          fd_valloc_t                          valloc,
-                         void *                               cb_ctx,
-                         fd_snapshot_restore_cb_manifest_fn_t cb );
+                         void *                               cb_manifest_ctx,
+                         fd_snapshot_restore_cb_manifest_fn_t cb_manifest,
+                         fd_snapshot_restore_cb_status_cache_fn_t cb_status_cache );
 
 /* fd_snapshot_restore_delete destroys the given restore object and
    frees any resources.  Returns main and scratch memory region back to
@@ -115,11 +128,6 @@ int
 fd_snapshot_restore_chunk( void *       restore,
                            void const * buf,
                            ulong        bufsz );
-
-/* Cleanup temporary buffers */
-
-void
-fd_snapshot_restore_discard_buf( fd_snapshot_restore_t * self );
 
 /* fd_snapshot_restore_tar_vt implements fd_tar_read_vtable_t. */
 

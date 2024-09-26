@@ -58,10 +58,13 @@ typedef struct {
   } log;
 
   struct {
+    char solana_metrics_config[ 512 ];
+  } reporting;
+
+  struct {
     char  path[ PATH_MAX ];
     char  accounts_path[ PATH_MAX ];
     uint  limit_size;
-    int   bigtable_storage;
     ulong account_indexes_cnt;
     char  account_indexes[ 4 ][ 32 ];
     ulong account_index_exclude_keys_cnt;
@@ -79,8 +82,11 @@ typedef struct {
   } gossip;
 
   struct {
+    int    vote;
     char   identity_path[ PATH_MAX ];
     char   vote_account_path[ PATH_MAX ];
+    ulong  authorized_voter_paths_cnt;
+    char   authorized_voter_paths[ 16 ][ PATH_MAX ];
     int    snapshot_fetch;
     int    genesis_fetch;
     int    poh_speed_test;
@@ -105,6 +111,7 @@ typedef struct {
     int    only_known;
     int    pubsub_enable_block_subscription;
     int    pubsub_enable_vote_subscription;
+    int    bigtable_ledger_storage;
   } rpc;
 
   struct {
@@ -116,6 +123,7 @@ typedef struct {
 
   struct {
     char affinity[ AFFINITY_SZ ];
+    char agave_affinity[ AFFINITY_SZ ];
     char solana_labs_affinity[ AFFINITY_SZ ];
 
     uint net_tile_count;
@@ -128,12 +136,13 @@ typedef struct {
   struct {
     char gigantic_page_mount_path[ PATH_MAX ];
     char huge_page_mount_path[ PATH_MAX ];
+    char mount_path[ PATH_MAX ];
   } hugetlbfs;
 
   struct {
     int sandbox;
     int no_clone;
-    int no_solana_labs;
+    int no_agave;
     int bootstrap;
     uint debug_tile;
     char topology[ 32 ];
@@ -158,6 +167,8 @@ typedef struct {
       ulong ticks_per_slot;
       ulong fund_initial_accounts;
       ulong fund_initial_amount_lamports;
+      ulong vote_account_stake_lamports;
+      int   warmup_epochs;
     } genesis;
 
     struct {
@@ -166,7 +177,7 @@ typedef struct {
       char affinity[ AFFINITY_SZ ];
       int  larger_max_cost_per_block;
       int  larger_shred_limits_per_block;
-      int  rocksdb_disable_wal;
+      int  disable_blockstore;
     } bench;
   } development;
 
@@ -194,7 +205,6 @@ typedef struct {
       uint stream_pool_cnt;
       uint max_concurrent_handshakes;
       uint max_inflight_quic_packets;
-      uint tx_buf_size;
       uint idle_timeout_millis;
       int  retry;
 
@@ -221,8 +231,50 @@ typedef struct {
     struct {
       ushort prometheus_listen_port;
     } metric;
+
+    /* Firedancer-only tile configs */
+
+    struct {
+      ulong  entrypoints_cnt;
+      char   entrypoints[16][256];
+      ushort gossip_listen_port;
+      ulong  peer_ports_cnt;
+      ushort peer_ports[16];
+    } gossip;
+
+    struct {
+      ushort repair_intake_listen_port;
+      ushort repair_serve_listen_port;
+    } repair;
+
+    struct {
+      char  blockstore_checkpt[ PATH_MAX ];
+      int   blockstore_publish;
+      char  capture[ PATH_MAX ];
+      char  funk_checkpt[ PATH_MAX ];
+      ulong funk_rec_max;
+      ulong funk_sz_gb;
+      ulong funk_txn_max;
+      char  genesis[ PATH_MAX ];
+      char  incremental[ PATH_MAX ];
+      char  slots_replayed[PATH_MAX ];
+      char  snapshot[ PATH_MAX ];
+      char  status_cache[ PATH_MAX ];
+      ulong tpool_thread_count;
+      uint  cluster_version;
+    } replay;
+
+    struct {
+      char  blockstore_restore[ PATH_MAX ];
+      char  slots_pending[PATH_MAX];
+      char  shred_cap_archive[ PATH_MAX ];
+      char  shred_cap_replay[ PATH_MAX ];
+    } store_int;
+
   } tiles;
 } config_t;
+
+FD_PROTOTYPES_BEGIN
 
 /* memlock_max_bytes() returns, for the entire Firedancer application,
    what the maximum total amount of `mlock()`ed memory will be in any
@@ -233,22 +285,26 @@ typedef struct {
 ulong
 memlock_max_bytes( config_t * const config );
 
-/* config_parse() loads a full configuration object from the provided
+/* fdctl_cfg_from_env() loads a full configuration object from the provided
    arguments or the environment. First, the `default.toml` file is
    loaded as a base, and then if a FIREDANCER_CONFIG_FILE environment
    variable is provided, or a --config <path> command line argument, the
    `toml` file at that path is loaded and applied on top of the default
    configuration. This exits the program if it encounters any issue
    while loading or parsing the configuration. */
+
 void
-config_parse( int *      pargc,
-              char ***   pargv,
-              config_t * config );
+fdctl_cfg_from_env( int *      pargc,
+                    char ***   pargv,
+                    config_t * config );
 
 /* Create a memfd and write the contents of the config struct into it.
    Used when execve() a child process so that it can read back in the
    same config as we did. */
+
 int
-config_write_memfd( config_t * config );
+fdctl_cfg_to_memfd( config_t * config );
+
+FD_PROTOTYPES_END
 
 #endif /* HEADER_fd_src_app_fdctl_config_h */

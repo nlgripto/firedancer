@@ -1,11 +1,12 @@
 /* _GNU_SOURCE for recvmmsg and sendmmsg */
 #define _GNU_SOURCE
 
-#include "../../fdctl/run/tiles/tiles.h"
+#include "../../../disco/tiles.h"
 #include "../../../waltz/xdp/fd_xsk_aio.h"
 #include "../../../waltz/quic/fd_quic.h"
 #include "../../../waltz/tls/test_tls_helper.h"
 
+#include <errno.h>
 #include <linux/unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -85,6 +86,7 @@ typedef struct {
   fd_quic_conn_t * quic_conn;
   const fd_aio_t * quic_rx_aio;
   ulong            no_stream;
+  uint             service_ratio_idx;
 
   // vector receive members
   struct mmsghdr rx_msgs[IO_VEC_CNT];
@@ -106,7 +108,6 @@ service_quic( fd_benchs_ctx_t * ctx ) {
 
   if( !ctx->no_quic ) {
     /* Publishes to mcache via callbacks */
-    fd_quic_service( ctx->quic );
 
     /* receive from socket, and pass to quic */
     int poll_rc = poll( ctx->poll_fd, ctx->conn_cnt, 0 );
@@ -221,12 +222,10 @@ handshake_complete( fd_quic_conn_t * conn,
 
 static void
 quic_stream_new( fd_quic_stream_t * stream,
-                 void *             _ctx,
-                 int                type ) {
+                 void *             _ctx ) {
   /* we don't expect the server to initiate streams */
   (void)stream;
   (void)_ctx;
-  (void)type;
 }
 
 /* quic_stream_receive is called back by the QUIC engine when any stream
@@ -265,6 +264,7 @@ conn_final( fd_quic_conn_t * conn,
 
   if( ctx ) {
     ctx->quic_conn = NULL;
+    ctx->stream    = NULL;
   }
 }
 
@@ -296,7 +296,7 @@ populate_quic_limits( fd_quic_limits_t * limits ) {
   limits->conn_id_sparsity = 4.0;
   limits->stream_sparsity = 2.0;
   limits->inflight_pkt_cnt = 1500;
-  limits->tx_buf_sz = 1<<12;
+  limits->tx_buf_sz = fd_ulong_pow2_up( FD_TXN_MTU );
   limits->stream_pool_cnt = 1<<16;
 }
 
@@ -306,7 +306,7 @@ populate_quic_config( fd_quic_config_t * config ) {
   config->service_interval = (ulong)1e6;
   config->ping_interval = (ulong)1e6;
   config->retry = 0;
-  config->initial_rx_max_stream_data = 1<<12;
+  config->initial_rx_max_stream_data = 0; /* we don't expect the server to initiate streams */
 
   config->net.ephem_udp_port.lo = 12000;
   config->net.ephem_udp_port.hi = 12100;
@@ -370,7 +370,13 @@ during_frag( void * _ctx,
 
     ctx->packet_cnt++;
   } else {
-    service_quic( ctx );
+    /* allows to accumulate multiple transactions before creating a UDP datagram */
+    /* make this configurable */
+    if( FD_UNLIKELY( ctx->service_ratio_idx++ == 8 ) ) {
+      ctx->service_ratio_idx = 0;
+      service_quic( ctx );
+      fd_quic_service( ctx->quic );
+    }
 
     if( FD_UNLIKELY( !ctx->quic_conn ) ) {
       ctx->no_stream = 0;
@@ -383,7 +389,8 @@ during_frag( void * _ctx,
 
       /* failed? try later */
       if( FD_UNLIKELY( !ctx->quic_conn ) ) {
-        FD_LOG_NOTICE(( "no connection available" ));
+        service_quic( ctx );
+        fd_quic_service( ctx->quic );
         return;
       }
 
@@ -394,6 +401,11 @@ during_frag( void * _ctx,
          this allows the notification to NULL the value when
          a connection dies */
       fd_quic_conn_set_context( ctx->quic_conn, ctx );
+
+      service_quic( ctx );
+      fd_quic_service( ctx->quic );
+
+      /* conn and streams may be invalidated by fd_quic_service */
 
       return;
     }
@@ -408,6 +420,12 @@ during_frag( void * _ctx,
 
     if( FD_UNLIKELY( !stream ) ) {
       ctx->no_stream++;
+      service_quic( ctx );
+      fd_quic_service( ctx->quic );
+
+      /* conn and streams may be invalidated by fd_quic_service */
+
+      return;
     } else {
       int fin = 1;
       fd_aio_pkt_info_t   batch[1]  = { { .buf    = fd_chunk_to_laddr( ctx->mem, chunk ),
@@ -431,8 +449,6 @@ during_frag( void * _ctx,
         }
       }
     }
-
-    fd_quic_service( ctx->quic );
   }
 }
 
@@ -474,8 +490,9 @@ privileged_init( fd_topo_t *      topo,
     ctx->quic        = quic;
     ctx->quic_rx_aio = fd_quic_get_aio_net_rx( quic );
 
-    ctx->tx_idx = 0UL;
-    ctx->stream = NULL;
+    ctx->quic_conn = NULL;
+    ctx->stream    = NULL;
+    ctx->tx_idx    = 0UL;
 
     /* call wallclock so glibc loads VDSO, which requires calling mmap while
        privileged */
@@ -571,7 +588,7 @@ unprivileged_init( fd_topo_t *      topo,
     quic->config.net.ip_addr                = quic_ip_addr;
     quic->config.net.listen_udp_port        = 42424; /* should be unused */
     quic->config.idle_timeout               = quic_idle_timeout_millis * 1000000UL;
-    quic->config.initial_rx_max_stream_data = 1<<15;
+    quic->config.initial_rx_max_stream_data = 0;
     quic->config.retry                      = 0; /* unused on clients */
     fd_memcpy( quic->config.link.src_mac_addr, quic_src_mac_addr, 6 );
 
@@ -607,7 +624,7 @@ unprivileged_init( fd_topo_t *      topo,
 static void
 quic_tx_aio_send_flush( fd_benchs_ctx_t * ctx ) {
   if( FD_LIKELY( ctx->tx_idx ) ) {
-    int flags = MSG_DONTWAIT;
+    int flags = 0;
     int rtn = sendmmsg( ctx->conn_fd[0], ctx->tx_msgs, (uint)ctx->tx_idx, flags );
     if( FD_UNLIKELY( rtn < 0 ) ) {
       FD_LOG_NOTICE(( "Error occurred in sendmmsg. Error: %d %s",
@@ -679,22 +696,11 @@ quic_tx_aio_send( void *                    _ctx,
   return 0;
 }
 
-static void
-before_credit( void * _ctx,
-               fd_mux_context_t * mux ) {
-  (void)mux;
-
-  fd_benchs_ctx_t * ctx = (fd_benchs_ctx_t*)_ctx;
-
-  service_quic( ctx );
-}
-
 fd_topo_run_tile_t fd_tile_benchs = {
   .name                     = "benchs",
   .mux_flags                = FD_MUX_FLAG_MANUAL_PUBLISH | FD_MUX_FLAG_COPY,
   .burst                    = 1UL,
   .mux_ctx                  = mux_ctx,
-  .mux_before_credit        = before_credit,
   .mux_before_frag          = before_frag,
   .mux_during_frag          = during_frag,
   .scratch_align            = scratch_align,

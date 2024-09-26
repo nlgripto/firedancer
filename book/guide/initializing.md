@@ -1,19 +1,20 @@
 # Initializing
 
 ## Overview
-The `fdctl configure` command is used to setup the host environment so
-Firedancer can run correctly. It should be run each and every time
-before the validator is started, and also should be rerun if the
-configuration file changes, even if the validator has not yet been
-started.
+The `fdctl configure` command is used to setup the host operator system
+so Firedancer can run correctly. It does three things:
 
-::: warning WARNING
+* **hugetlbfs** Reserves huge and gigantic pages for use by Firedancer.
+* **sysctl** Sets required kernel parameters.
+* **ethtool-channels** Configures the number of channels on the network
+device.
+* **ethtool-gro** Disable generic-receive-offload (GRO) on the network
+device.
 
-Configuring the system for Firedancer has many moving parts and you
-should prefer to run `fdctl configure init all` if possible. The stages
-are described here in detail for advanced use cases and operators only.
-
-:::
+The `hugetlbfs` configuration must be performed every time the system
+is rebooted, to remount the `hugetlbfs` filesystems, but `sysctl`,
+`ethtool-channels` and `ethtool-gro` configuration only needs to be
+performed on the machine once.
 
 The configure command is run like `fdctl configure <mode> <stage>...`
 where `mode` is one of:
@@ -25,10 +26,9 @@ where `mode` is one of:
    privileges and will not make any changes to the system.
  - `fini` Unconfigure (reverse) the stage if it is reversible.
 
-`stage` can be one or more of `hugetlbfs`, `sysctl`, `xdp`,
-`xdp-leftover`, `ethtool`, `workspace-leftover`, or `workspace` and
-these stages are described below. You can also use the stage `all`
-which will configure everything.
+`stage` can be one or more of `hugetlbfs`, `sysctl`, `ethtool-channels`
+or `ethtool-gro` and these stages are described below. You can also use
+the stage `all` which will configure everything.
 
 Stages have different privilege requirements, which you can see by
 trying to run the stage without privileges. The `check` mode never
@@ -66,10 +66,12 @@ without requiring privileges.
 The `fini` mode will unmount the two filesystems, and remove them from
 `/mnt/.fd/`, although it will leave the `/mnt/.fd/` directory in place.
 The `fini` mode will not succeed if memory from the mounts is mapped
-into a running process. This will return the huge and gigantic pages
-that Firedancer had reserved to the global kernel pool, although we
-will not decrease the global pool size, even if it was earlier increased
-during `init`.
+into a running process.
+
+If fini succeeds, the huge and gigantic pages that Firedancer had
+reserved will be returned to the kernel global pool so they can be used
+by other programs, but the global pool size will not be decreased, even
+if it was earlier increased during `init`.
 
 ::: tip TIP
 
@@ -85,57 +87,25 @@ for best performance. The `sysctl` stage will check and configure these
 parameters. The stage will only increase values to meet the minimum, and
 will not decrease them if the minimum is already met.
 
-| Sysctl                                  | Minimum     | Description
-|-----------------------------------------| ----------- | -----------
-| /proc/sys/net/core/rmem_max             | 134217728   | Solana Labs network performance tuning.
-| /proc/sys/net/core/rmem_default         | 134217728   | Solana Labs network performance tuning.
-| /proc/sys/net/core/wmem_max             | 134217728   | Solana Labs network performance tuning.
-| /proc/sys/net/core/wmem_default         | 134217728   | Solana Labs network performance tuning.
-| /proc/sys/vm/max_map_count              | 1000000     | Solana Labs accounts database requires mapping many files.
-| /proc/sys/fs/file-max                   | 1024000     | Solana Labs accounts database requires opening many files.
-| /proc/sys/fs/nr_open                    | 1024000     | Solana Labs accounts database requires opening many files.
-| /proc/sys/net/core/bpf_jit_enable       | 1           | Firedancer uses BPF for kernel bypass networking. BPF JIT makes this faster.
-| /proc/sys/net/ipv4/conf/lo/rp_filter    | 2           | Enable loose mode for reverse path filtering on the loopback interface. Loose mode is required for the XSK socket to successfully send packets to loopback.
-| /proc/sys/net/ipv4/conf/lo/accept_local | 1           | Accept packets with local source addresses on the loopback interface. This is required for the XSK socket to successfully send packets to loopback.
+| Sysctl                                  | Minimum     | Required | Description
+|-----------------------------------------| ----------- | -------- | -----------
+| /proc/sys/vm/max_map_count              | 1000000     | Yes      | Agave accounts database requires mapping many files.
+| /proc/sys/fs/file-max                   | 1024000     | Yes      | Agave accounts database requires opening many files.
+| /proc/sys/fs/nr_open                    | 1024000     | Yes      | Agave accounts database requires opening many files.
+| /proc/sys/net/ipv4/conf/lo/rp_filter    | 2           | Yes      | If sending QUIC transactions to Firedancer over loopback, this must be enabled to receive a response. Otherwise Linux will drop response packets due to limitations in the kernel eBPF networking stack. The sendTransaction RPC call will send over loopback. 
+| /proc/sys/net/ipv4/conf/lo/accept_local | 1           | Yes      | If sending QUIC transactions to Firedancer over loopback, this must be enabled to receive a response. Otherwise Linux will drop response packets due to limitations in the kernel eBPF networking stack. The sendTransaction RPC call will send over loopback.
+| /proc/sys/net/core/bpf_jit_enable       | 1           | No       | Firedancer uses BPF for kernel bypass networking. BPF JIT makes this faster.
+| /proc/sys/kernel/numa_balancing         | 0           | No       | Firedancer assigns all memory to the right NUMA node, and rebalancing will make the system slower.
+
+Sysctls that are not required will produce a warning if they are not set
+correctly, but configuration will proceed and exit normally.
 
 The `init` mode requires either `root` privileges, or to be run with
 `CAP_SYS_ADMIN`. The `fini` mode does nothing and kernel parameters
-will never be reduced as a result of running `configure`.
+will never be reduced or changed back as a result of running
+`configure`.
 
-## xdp
-Firedancer uses XDP (express data path), a Linux feature for doing high
-performance kernel bypass networking. For more background see the
-[kernel
-documentation](https://www.kernel.org/doc/html/next/networking/af_xdp.html).
-
-To configure XDP, a BPF program is loaded onto both the configured
-network interface `[tiles.net.interface]` and the loopback interface
-`lo`. This BPF program intercepts packets matching a Firedancer listen
-port before they reach the kernel. Matching packets are routed directly
-to Firedancer.
-
-::: warning
-
-Packets intercepted by the BPF program will not appear under standard
-network monitoring tools like `tcpdump`.
-
-:::
-
-The BPF program is loaded into `/sys/fs/bpf/<name>/` and will remain
-loaded until `fini` is run. If loaded, packets for the target ports will
-be intercepted even when Firedancer itself is not running. `fini` will
-fully unload the program, packets for the target ports will resume being
-routed to the kernel and regular networking stack.
-
-This stage must be run, and it is not possible to manually configure it.
-The stage not only loads the program, but sets up special configuration
-objects (BPF maps) so that it functions correctly.
-
-The stage must be rerun any time the system is rebooted, any time
-Firedancer is updated, or any time the configuration file changes. The
-`init` mode requires `root` or both `CAP_SYS_ADMIN` and `CAP_NET_RAW`.
-
-## ethtool
+## ethtool-channels
 In addition to XDP, Firedancer uses receive side scaling (RSS) to
 improve network performance. This uses functionality of modern NICs to
 steer packets to different queues to distribute processing among CPUs.
@@ -144,55 +114,39 @@ documentation](https://docs.kernel.org/networking/scaling.html) for more
 information.
 
 In Firedancer, each `net` tile serves one network queue, so the
-`ethtool` stage will modify the combined channel count of the configured
-network device `[tiles.net.interface]` to be the same as the number of
-`net` tiles, `[layout.net_tile_count]`. If your NIC does not support the
-required number of queues, you will need to reduce the number of `net`
-tiles, potentially down to one for NICs which don't support queues at
-all.
+`ethtool-channels` stage will modify the combined channel count of the
+configured network device `[tiles.net.interface]` to be the same as the
+number of `net` tiles, `[layout.net_tile_count]`. If your NIC does not
+support the required number of queues, you will need to reduce the
+number of `net` tiles, potentially down to one for NICs which don't
+support queues at all.
 
 The command run by the stage is similar to running `ethtool
 --set-channels <device> combined <N>` but it also supports bonded
 devices. We can check that it worked:
 
-<<< @/snippets/ethtool.ansi
+<<< @/snippets/ethtool-channels.ansi
 
 The stage only needs to be run once after boot but before running
 Firedancer. It has no dependencies on any other stage, although it is
-dependent on the number of  in your
-configuration.
+dependent on the number of `net` tiles in your configuration.
 
-Changing device settings with `ethtool` requires root privileges, and
+Changing device settings with `ethtool-channels` requires root privileges, and
 cannot be performed with capabilities.
 
-## workspace
-A Firedancer workspace is a special in-memory file with extension
-`.wksp` created in the shmem mountpoints described above. It can be
-thought of as just a chunk of memory. Almost all memory in Firedancer is
-reserved, allocated, and initialized before running the program. The
-allocations are made in this workspace, which has a special header so we
-can look up where each one is.
+## ethtool-gro
+XDP is incomatible with a feature of network devices called
+`generic-receive-offload`. If enabled, this feature must be disabled for
+Firedancer to work.
 
-In the future, Firedancer will support persistent workspaces that
-are kept between runs. If that were supported, you could restart the
-program very quickly from existing memory.
+The command run by the stage is similar to running `ethtool --offload
+generic-receive-offload <device> off` but it also supports bonded
+devices. We can check that it worked:
 
-For now though, the stage must be run every time before running
-Firedancer to get a cleanly initialized memory space.
+<<< @/snippets/ethtool-gro.ansi
 
-The `workspace` stage only initializes memory that was already reserved
-in a large block by the `shmem` stage, and does not require any
-privileges. It needs to be run after the `shmem` stage but does not have
-other dependencies.
+The stage only needs to be run once after boot but before running
+Firedancer. It has no dependencies on any other stage.
 
-The `check` mode will always fail, as the workspace always needs
-to be reinitialized. The fini mode will remove existing workspaces from
-the shared memory mount points.
-
-::: tip TIP
-
-It is possible to run Firedancer without rerunning most of the stages of
-`fdctl configure`, except `workspace`, if you are sure that your
-environment has been set up correctly.
-
-:::
+Changing device settings with `ethtool-gro` requires root privileges, and
+cannot be performed with capabilities.

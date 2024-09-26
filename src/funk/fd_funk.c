@@ -184,6 +184,10 @@ fd_funk_join( void * shfunk ) {
     return NULL;
   }
 
+#ifdef FD_FUNK_WKSP_PROTECT
+  fd_wksp_mprotect( wksp, 1 );
+#endif
+
   return funk;
 }
 
@@ -228,7 +232,7 @@ fd_funk_delete( void * shfunk ) {
   fd_wksp_free_laddr( fd_alloc_delete       ( fd_alloc_leave       ( fd_funk_alloc  ( funk, wksp ) ) ) );
   fd_wksp_free_laddr( fd_funk_rec_map_delete( fd_funk_rec_map_leave( fd_funk_rec_map( funk, wksp ) ) ) );
   fd_wksp_free_laddr( fd_funk_txn_map_delete( fd_funk_txn_map_leave( fd_funk_txn_map( funk, wksp ) ) ) );
-  
+
   FD_COMPILER_MFENCE();
   FD_VOLATILE( funk->magic ) = 0UL;
   FD_COMPILER_MFENCE();
@@ -370,7 +374,7 @@ void
 fd_funk_log_mem_usage( fd_funk_t * funk ) {
   char tmp1[100];
   char tmp2[100];
-      
+
   FD_LOG_NOTICE(( "funk base footprint: %s",
                   fd_smart_size( fd_funk_footprint(), tmp1, sizeof(tmp1) ) ));
   fd_wksp_t * wksp = fd_funk_wksp( funk );
@@ -411,18 +415,28 @@ fd_funk_log_mem_usage( fd_funk_t * funk ) {
 
 void
 fd_funk_start_write( fd_funk_t * funk ) {
+#ifdef FD_FUNK_WKSP_PROTECT
+  fd_wksp_mprotect( fd_funk_wksp( funk ), 0 );
+#endif
+# if FD_HAS_THREADS
   register ulong oldval;
   for(;;) {
     oldval = funk->write_lock;
     if( FD_LIKELY( FD_ATOMIC_CAS( &funk->write_lock, oldval, oldval+1U) == oldval ) ) break;
     FD_SPIN_PAUSE();
   }
-  if( FD_UNLIKELY(oldval&1UL) ) FD_LOG_CRIT(( "attempt to lock funky when it is already locked" ));
+  if( FD_UNLIKELY(oldval&1UL) ) {
+     FD_LOG_CRIT(( "attempt to lock funky when it is already locked" ));
+  }
   FD_COMPILER_MFENCE();
+# else
+  (void)funk;
+# endif
 }
 
 void
 fd_funk_end_write( fd_funk_t * funk ) {
+# if FD_HAS_THREADS
   FD_COMPILER_MFENCE();
   register ulong oldval;
   for(;;) {
@@ -430,11 +444,24 @@ fd_funk_end_write( fd_funk_t * funk ) {
     if( FD_LIKELY( FD_ATOMIC_CAS( &funk->write_lock, oldval, oldval+1U) == oldval ) ) break;
     FD_SPIN_PAUSE();
   }
-  if( FD_UNLIKELY(!(oldval&1UL)) ) FD_LOG_CRIT(( "attempt to unlock funky when it is already unlocked" ));
+  if( FD_UNLIKELY(!(oldval&1UL)) ) {
+    FD_LOG_CRIT(( "attempt to unlock funky when it is already unlocked" ));
+  }
+# else
+  (void)funk;
+# endif
+#ifdef FD_FUNK_WKSP_PROTECT
+  fd_wksp_mprotect( fd_funk_wksp( funk ), 1 );
+#endif
 }
 
 void
 fd_funk_check_write( fd_funk_t * funk ) {
   ulong val = funk->write_lock;
   if( FD_UNLIKELY(!(val&1UL)) ) FD_LOG_CRIT(( "missing call to fd_funk_start_write" ));
+}
+
+void
+fd_funk_speed_load_mode( fd_funk_t * funk, int flag ) {
+  funk->speed_load = flag;
 }

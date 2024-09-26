@@ -1,4 +1,6 @@
 #include "fd_wksp_private.h"
+#include <sys/mman.h>
+#include <errno.h>
 
 int
 fd_wksp_private_lock( fd_wksp_t * wksp ) {
@@ -205,8 +207,13 @@ fd_wksp_new( void *       shmem,
   }
 
   #if FD_HAS_DEEPASAN
-  void * laddr_lo = fd_wksp_laddr_fast( wksp, wksp->gaddr_lo + sizeof(fd_wksp_t) );
-  fd_asan_poison( laddr_lo, footprint - sizeof(fd_wksp_t) );
+  /* Poison entire workspace except wksp header and the pinfo array. */
+  void * wksp_data = (void*)((ulong)wksp + fd_wksp_private_pinfo_off());
+  fd_asan_poison( wksp_data, footprint - fd_wksp_private_pinfo_off() );
+  fd_wksp_private_pinfo_t * pinfo = fd_wksp_private_pinfo( wksp );
+  for( ulong i=0; i<part_max; i++ ) { 
+    fd_asan_unpoison( &pinfo[ i ], FD_WKSP_PRIVATE_PINFO_FOOTPRINT );
+  }
   #endif
 
   fd_wksp_private_unlock( wksp );
@@ -271,13 +278,12 @@ fd_wksp_delete( void * shwksp ) {
   FD_VOLATILE( wksp->magic ) = 0UL;
   FD_COMPILER_MFENCE();
 
-  #if FD_HAS_DEEPASAN
-  /* Unpoison everything in case region of memory is reallocated at some point.
-     Fill wksp bytes with human readable junk for debugging. */
-  ulong wksp_footprint = fd_wksp_footprint( wksp->part_max, wksp->data_max );
-  fd_asan_unpoison( wksp, wksp_footprint );
-  fd_memset( (void*)wksp, 'B', wksp_footprint );
-  #endif
+# if FD_HAS_DEEPASAN
+  /* Unpoison entire wksp region. */
+  ulong footprint = fd_wksp_footprint( wksp->part_max, wksp->data_max );
+  void * wksp_data = (void*)((ulong)wksp + fd_wksp_private_pinfo_off());
+  fd_asan_unpoison( wksp_data, footprint - fd_wksp_private_pinfo_off());
+# endif
 
   return wksp;
 }
@@ -780,4 +786,28 @@ fd_wksp_rebuild( fd_wksp_t * wksp,
   } while(0);
 
   return FD_WKSP_SUCCESS;
+}
+
+void
+fd_wksp_mprotect( fd_wksp_t * wksp, int flag ) {
+  if( FD_UNLIKELY( !wksp ) ) {
+    FD_LOG_WARNING(( "NULL wksp" ));
+    return;
+  }
+
+  if( FD_UNLIKELY( !fd_ulong_is_aligned( (ulong)wksp, FD_WKSP_ALIGN ) ) ) {
+    FD_LOG_WARNING(( "bad align" ));
+    return;
+  }
+
+  if( FD_UNLIKELY( wksp->magic!=FD_WKSP_MAGIC ) ) {
+    FD_LOG_WARNING(( "bad magic" ));
+    return;
+  }
+
+  ulong wksp_footprint = fd_wksp_footprint( wksp->part_max, wksp->data_max );
+  if( FD_UNLIKELY( mprotect( (void*)wksp, wksp_footprint, ( flag ? PROT_READ : (PROT_READ|PROT_WRITE) ) ) ) ) {
+    FD_LOG_WARNING(( "mprotect failed (%i-%s)", errno, fd_io_strerror( errno ) ));
+    return;
+  }
 }

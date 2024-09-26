@@ -112,6 +112,10 @@ struct __attribute__((aligned(16UL))) fd_quic_state_private {
   /* last arp/routing tables update */
   ulong ip_table_upd;
 
+  /* secret for generating RETRY tokens */
+  uchar retry_secret[FD_QUIC_RETRY_SECRET_SZ];
+  uchar retry_iv    [FD_QUIC_RETRY_IV_SZ];
+
   /* Scratch space for packet protection */
   uchar                   crypt_scratch[FD_QUIC_MTU];
 };
@@ -137,8 +141,6 @@ struct fd_quic_pkt {
 # define ACK_FLAG_RQD     1
 # define ACK_FLAG_CANCEL  2
 };
-
-typedef struct fd_quic_pkt fd_quic_pkt_t;
 
 FD_PROTOTYPES_BEGIN
 
@@ -240,6 +242,11 @@ void
 fd_quic_tls_cb_handshake_complete( fd_quic_tls_hs_t * hs,
                                    void *             context  );
 
+void
+fd_quic_tls_cb_peer_params( void *        context,
+                            uchar const * peer_tp_enc,
+                            ulong         peer_tp_enc_sz );
+
 /* Helpers for calling callbacks **************************************/
 
 static inline ulong
@@ -274,10 +281,9 @@ fd_quic_cb_conn_final( fd_quic_t *      quic,
 
 static inline void
 fd_quic_cb_stream_new( fd_quic_t *        quic,
-                       fd_quic_stream_t * stream,
-                       int                stream_type ) {
+                       fd_quic_stream_t * stream ) {
   if( FD_UNLIKELY( !quic->cb.stream_new ) ) return;
-  quic->cb.stream_new( stream, quic->cb.quic_ctx, stream_type );
+  quic->cb.stream_new( stream, quic->cb.quic_ctx );
 
   /* update metrics */
   ulong stream_id = stream->stream_id;
@@ -332,12 +338,17 @@ fd_quic_reclaim_pkt_meta( fd_quic_conn_t *     conn,
 ulong
 fd_quic_send_retry( fd_quic_t *                  quic,
                     fd_quic_pkt_t *              pkt,
-                    fd_quic_transport_params_t * tp,
                     fd_quic_conn_id_t const *    orig_dst_conn_id,
                     fd_quic_conn_id_t const *    new_conn_id,
                     uchar const                  dst_mac_addr_u6[ 6 ],
                     uint                         dst_ip_addr,
                     ushort                       dst_udp_port );
+
+ulong
+fd_quic_process_quic_packet_v1( fd_quic_t *     quic,
+                                fd_quic_pkt_t * pkt,
+                                uchar *         cur_ptr,
+                                ulong           cur_sz );
 
 ulong
 fd_quic_handle_v1_initial( fd_quic_t *               quic,
@@ -353,6 +364,39 @@ fd_quic_handle_v1_one_rtt( fd_quic_t *      quic,
                            fd_quic_pkt_t *  pkt,
                            uchar *          cur_ptr,
                            ulong            cur_sz );
+
+/* fd_quic_handle_v1_frame is the primary entrypoint for handling of
+   incoming QUIC frames.  {quic,conn,pkt} identify the frame context.
+   Memory region [frame_ptr,frame_ptr+frame_sz) contains the serialized
+   QUIC frame (may contain arbitrary zero padding at the beginning).
+   frame_scratch is used as scratch space for deserialization and frame
+   handling.
+
+   Returns value in (0,buf_sz) if the frame was successfully processed.
+   Returns FD_QUIC_PARSE_FAIL if the frame was inherently malformed.
+   Returns 0 or value in [buf_sz,ULONG_MAX) in case of a protocol
+   violation. */
+
+ulong
+fd_quic_handle_v1_frame( fd_quic_t *       quic,
+                         fd_quic_conn_t *  conn,
+                         fd_quic_pkt_t *   pkt,
+                         uint              pkt_type,
+                         uchar const *     frame_ptr,
+                         ulong             frame_sz,
+                         fd_quic_frame_u * frame_scratch );
+
+/* fd_quic_conn_error sets the connection state to aborted.  This does
+   not destroy the connection object.  Rather, it will eventually cause
+   the connection to be freed during a later fd_quic_service call.
+   reason is a RFC 9000 QUIC error code.  error_line is a implementation
+   defined error code for internal use (usually the source line of code
+   in fd_quic.c) */
+
+void
+fd_quic_conn_error( fd_quic_conn_t * conn,
+                    uint             reason,
+                    uint             error_line );
 
 /* fd_quic_assign_streams attempts to distribute streams across         */
 /* connections fairly                                                   */

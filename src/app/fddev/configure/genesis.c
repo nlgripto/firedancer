@@ -27,10 +27,7 @@ default_enable_features( fd_features_t * features ) {
   features->curve25519_restrict_msm_length = 0UL;
   features->commission_updates_only_allowed_in_first_half_of_epoch = 0UL;
   features->validate_fee_collector_account = 0UL;
-  features->zk_token_sdk_enabled = 0UL;
-  features->enable_zk_transfer_with_fee = 0UL;
   features->incremental_snapshot_only_incremental_hash_calculation = 0UL;
-  features->stake_redelegate_instruction = 0UL;
   features->timely_vote_credits = 0UL;
   features->apply_cost_tracker_during_replay = 0UL;
   features->reject_callx_r10 = 0UL;
@@ -149,8 +146,9 @@ create_genesis( config_t * const config,
   memcpy( options->vote_pubkey.key, vote_pubkey_, 32 );
 
 
-  options->creation_time  = (ulong)fd_log_wallclock() / (ulong)1e9;
-  options->faucet_balance = 500000000000000000UL;
+  options->creation_time      = (ulong)fd_log_wallclock() / (ulong)1e9;
+  options->faucet_balance     = 500000000000000000UL;
+  options->vote_account_stake = config->development.genesis.vote_account_stake_lamports;
 
   /* Set up PoH config */
 
@@ -187,9 +185,11 @@ create_genesis( config_t * const config,
   options->fund_initial_accounts        = config->development.genesis.fund_initial_accounts;
   options->fund_initial_amount_lamports = config->development.genesis.fund_initial_amount_lamports;
 
+  options->warmup_epochs                = config->development.genesis.warmup_epochs;
+
   fd_features_t features[1];
   fd_features_disable_all( features );
-  fd_features_enable_hardcoded( features );
+  fd_features_enable_cleaned_up( features, FD_DEFAULT_AGAVE_CLUSTER_VERSION );
   default_enable_features( features );
 
   options->features = features;

@@ -8,8 +8,6 @@
 #include "fd_runtime.h"
 #include <assert.h>
 
-#define MAX_PERMITTED_DATA_LENGTH ( 10 * 1024 * 1024 )
-
 /* Represents the lamport balance associated with an account. */
 typedef ulong fd_acc_lamports_t;
 
@@ -20,38 +18,11 @@ fd_account_get_data(fd_account_meta_t * m) {
   return ((char *) m) + m->hlen;
 }
 
-//    /// Returns true if the owner of this account is the current `InstructionContext`s last program (instruction wide)
+// TODO: Confirm if the program id pubkey actually corresponds to the last program id
+// Returns true if the owner of this account is the current `InstructionContext`s last program (instruction wide)
 static inline
-int fd_account_is_owned_by_current_program2(const FD_FN_UNUSED fd_exec_instr_ctx_t *ctx, const FD_FN_UNUSED fd_account_meta_t * acct, FD_FN_UNUSED  int *err) {
-//        self.instruction_context
-//            .get_last_program_key(self.transaction_context)
-//            .map(|key| key == self.get_owner())
-//            .unwrap_or_default()
-  return 1;
-}
-
-static inline
-int fd_account_is_writable_idx( fd_txn_t const * txn_descriptor,
-                                fd_pubkey_t const * accounts,
-                                uchar program_id,
-                                int idx ) {
-  int acct_addr_cnt = txn_descriptor->acct_addr_cnt;
-  if (txn_descriptor->transaction_version == FD_TXN_V0) {
-    acct_addr_cnt += txn_descriptor->addr_table_adtl_cnt;
-  }
-
-  if (idx == acct_addr_cnt)
-    return 0;
-
-  // You just cannot write to a program...
-  if (idx == program_id)
-    return 0;
-
-  if (fd_pubkey_is_builtin_program(&accounts[idx]) || fd_pubkey_is_sysvar_id(&accounts[idx])) {
-    return 0;
-  }
-
-  return fd_txn_is_writable(txn_descriptor, idx);
+int fd_account_is_owned_by_current_program2(const fd_exec_instr_ctx_t *ctx, const fd_account_meta_t * acct, FD_FN_UNUSED int *err) {
+  return memcmp( &ctx->instr->program_id_pubkey, acct->info.owner, sizeof(fd_pubkey_t) ) == 0;
 }
 
 static inline
@@ -75,39 +46,11 @@ int fd_account_can_data_be_changed2(fd_exec_instr_ctx_t *ctx, fd_account_meta_t 
   return 1;
 }
 
-static inline int
-fd_account_set_data_length2( fd_exec_instr_ctx_t * ctx,
-                            fd_account_meta_t * acct,
-                            fd_pubkey_t const * key,
-                            ulong new_length,
-                            int space_check,
-                            int * err) {
-  if (!fd_account_can_data_be_resized(ctx->instr, acct, new_length, err))
-    return 0;
-
-  if (!fd_account_can_data_be_changed2(ctx, acct, key, err))
-    return 0;
-
-  if (acct->dlen == new_length)
-    return 1;
-
-  if (space_check && (acct->dlen < new_length)) {
-    //do magic to make sure it fits...
-  }
-
-  uchar *data = ((uchar *) acct) + acct->hlen;
-
-  if (new_length > acct->dlen)
-    memset(&data[acct->dlen], 0, new_length - acct->dlen);
-
-  acct->dlen = new_length;
-
-  return 1;
-}
-
 static inline
 int fd_account_set_executable2( fd_exec_instr_ctx_t * ctx,
-                               fd_pubkey_t const * program_acc, fd_account_meta_t * metadata, char is_executable) {
+                                fd_pubkey_t const * program_acc, 
+                                fd_account_meta_t * metadata, 
+                                char is_executable ) {
   fd_rent_t rent;
   fd_rent_new( &rent );
   if( fd_sysvar_rent_read( &rent, ctx->slot_ctx ) ) {

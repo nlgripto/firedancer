@@ -17,20 +17,27 @@ If you are an operator or looking to run the validator, see the Getting
 Started guide in the [Firedancer
 docs](https://firedancer-io.github.io/firedancer/)
 
+## Releases
+If you are an operator looking to run the validator, see the [Releases
+Guide](https://firedancer-io.github.io/firedancer/guide/getting-started.html#releases)
+in the documentation.
+
+The Firedancer project is producing two validators,
+
+* **Frankendancer** A hybrid validator using parts of Firedancer and
+parts of Agave. Frankendancer uses the Firedancer networking stack and
+block production components to perform better while leader. Other
+functionality including execution and consensus is using the Agave
+validator code.
+* **Firedancer** A full from-scratch Firedancer with no Agave code.
+
+Both validators are built from this codebase. The Firedancer validator
+is not ready for test or production use and has no releases.
+Frankendancer is currently in testing on the Solana testnet.
+
 ## Developing
-The below describes building Frankendancer from scratch and running it
-optimized on a stock Linux image. You will need basic development tools
-like `make`, `gcc` along with `rustc`, and `clang`.
-
-Frankendancer currently only supports Linux, and requires a kernel newer
-than v5.7 to build.
-
-```bash
-$ sudo dnf groupinstall development
-$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-Then you can clone and build the application from source,
+Firedancer currently only supports Linux and requires a relatively new
+kernel, at least v4.18 to build. 
 
 ```bash
 $ git clone --recurse-submodules https://github.com/firedancer-io/firedancer.git
@@ -50,9 +57,6 @@ By default `fddev` will create a new development cluster, if you wish to
 join this cluster with other validators, you can define
 `[rpc.entrypoints]` in the configuration file to point at your first
 validator and run `fddev dev` again.
-
-### Code Coverage
-Test and fuzzing coverage are available [here](https://storage.googleapis.com/firedancer-ci-artifacts-public/index.html).
 
 ## License
 Firedancer is available under the [Apache 2

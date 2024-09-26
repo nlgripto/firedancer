@@ -2,7 +2,6 @@
 #define HEADER_fd_src_flamenco_runtime_context_fd_exec_txn_ctx_h
 
 #include "fd_exec_instr_ctx.h"
-#include "../fd_executor.h"
 #include "../../../util/fd_util_base.h"
 
 #include "../fd_borrowed_account.h"
@@ -39,6 +38,19 @@ typedef struct fd_vote_account_cache_entry fd_vote_account_cache_entry_t;
 #define MAP_KEY_HASH(key,seed) ( ((key)->ui[0]) ^ (seed) )
 #include "../../../util/tmpl/fd_map_chain.c"
 
+/* An entry in the instruction trace */
+struct fd_exec_instr_trace_entry {
+  /* Metadata about the instruction */
+  fd_instr_info_t * instr_info;
+  /* Stack height when this instruction was pushed onto the stack (including itself)
+     https://github.com/anza-xyz/agave/blob/d87e23d8d91c32d5f2be2bb3557c730bee1e9434/sdk/src/transaction_context.rs#L475-L480 */
+  ulong stack_height;
+};
+typedef struct fd_exec_instr_trace_entry fd_exec_instr_trace_entry_t;
+
+/* https://github.com/anza-xyz/agave/blob/0d34a1a160129c4293dac248e14231e9e773b4ce/program-runtime/src/compute_budget.rs#L139 */
+#define FD_MAX_INSTRUCTION_TRACE_LENGTH (64UL)
+
 struct __attribute__((aligned(8UL))) fd_exec_txn_ctx {
   ulong magic; /* ==FD_EXEC_TXN_CTX_MAGIC */
 
@@ -62,6 +74,7 @@ struct __attribute__((aligned(8UL))) fd_exec_txn_ctx {
   uchar                 instr_stack_sz;                  /* Current depth of the instruction execution stack. */
   fd_exec_instr_ctx_t   instr_stack[6];                  /* Instruction execution stack. */
   fd_exec_instr_ctx_t * failed_instr;
+  int                   instr_err_idx;
   ulong                 accounts_cnt;                    /* Number of account pubkeys accessed by this transaction. */
   fd_pubkey_t           accounts[128];                   /* Array of account pubkeys accessed by this transaction. */
   ulong                 executable_cnt;                  /* Number of BPF upgradeable loader accounts. */
@@ -73,16 +86,34 @@ struct __attribute__((aligned(8UL))) fd_exec_txn_ctx {
   fd_txn_return_data_t  return_data;                     /* Data returned from `return_data` syscalls */
   fd_vote_account_cache_t * vote_accounts_map;           /* Cache of bank's deserialized vote accounts to support fork choice */
   fd_vote_account_cache_entry_t * vote_accounts_pool;    /* Memory pool for deserialized vote account cache */
+  ulong                 accounts_resize_delta;           /* Transaction level tracking for account resizing */
+  fd_hash_t             blake_txn_msg_hash;              /* Hash of raw transaction message used by the status cache */
+  ulong                 execution_fee;                   /* Execution fee paid by the fee payer in the transaction */
+  ulong                 priority_fee;                    /* Priority fee paid by the fee payer in the transaction */
 
   uchar dirty_vote_acc  : 1;  /* 1 if this transaction maybe modified a vote account */
   uchar dirty_stake_acc : 1;  /* 1 if this transaction maybe modified a stake account */
 
   fd_capture_ctx_t * capture_ctx;
+
+  /* The instr_infos for the entire transaction are allocated at the start of
+     the transaction. However, this must preserve a different counter because
+     the top level instructions must get set up at once. The instruction 
+     error check on a maximum instruction size can be done on the
+     instr_info_cnt instead of the instr_trace_length because it is a proxy
+     for the trace_length: the instr_info_cnt gets incremented faster than
+     the instr_trace_length because it counts all of the top level instructions
+     first. */
+  fd_instr_info_t             instr_infos[FD_MAX_INSTRUCTION_TRACE_LENGTH];
+  ulong                       instr_info_cnt;
+
+  fd_exec_instr_trace_entry_t instr_trace[FD_MAX_INSTRUCTION_TRACE_LENGTH]; /* Instruction trace */
+  ulong                       instr_trace_length;                           /* Number of instructions in the trace */
 };
 
 #define FD_EXEC_TXN_CTX_ALIGN     (alignof(fd_exec_txn_ctx_t))
 #define FD_EXEC_TXN_CTX_FOOTPRINT ( sizeof(fd_exec_txn_ctx_t))
-#define FD_EXEC_TXN_CTX_MAGIC (0x9AD93EE71469F4D7UL) /* random */
+#define FD_EXEC_TXN_CTX_MAGIC     (0x9AD93EE71469F4D7UL      ) /* random */
 
 FD_PROTOTYPES_BEGIN
 
@@ -108,19 +139,6 @@ fd_exec_txn_ctx_from_exec_slot_ctx( fd_exec_slot_ctx_t * slot_ctx,
 
 void
 fd_exec_txn_ctx_teardown( fd_exec_txn_ctx_t * txn_ctx );
-
-static inline int
-fd_exec_consume_cus( fd_exec_txn_ctx_t * txn_ctx,
-                     ulong               cus ) {
-  ulong new_cus   =  txn_ctx->compute_meter - cus;
-  int   underflow = (txn_ctx->compute_meter < cus);
-  if( FD_UNLIKELY( underflow ) ) {
-    txn_ctx->compute_meter = 0UL;
-    return FD_EXECUTOR_INSTR_ERR_COMPUTE_BUDGET_EXCEEDED;
-  }
-  txn_ctx->compute_meter = new_cus;
-  return FD_EXECUTOR_INSTR_SUCCESS;
-}
 
 int
 fd_txn_borrowed_account_view_idx( fd_exec_txn_ctx_t * ctx,

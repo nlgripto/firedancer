@@ -1,10 +1,9 @@
 #include "fd_sysvar_slot_history.h"
-#include "../../types/fd_types.h"
 #include "fd_sysvar.h"
 #include "fd_sysvar_rent.h"
+#include "../fd_executor_err.h"
 #include "../fd_system_ids.h"
 #include "../context/fd_exec_epoch_ctx.h"
-#include "../context/fd_exec_slot_ctx.h"
 
 const ulong slot_history_min_account_size = 131097;
 
@@ -37,15 +36,15 @@ int fd_sysvar_slot_history_write_history( fd_exec_slot_ctx_t * slot_ctx,
   ulong sz = fd_slot_history_size( history );
   if (sz < slot_history_min_account_size)
     sz = slot_history_min_account_size;
-  unsigned char *enc = fd_alloca( 1, sz );
-  memset( enc, 0, sz );
+  uchar enc[ sz ];
+  fd_memset( enc, 0, sz );
   fd_bincode_encode_ctx_t ctx;
   ctx.data = enc;
   ctx.dataend = enc + sz;
   int err = fd_slot_history_encode( history, &ctx );
   if (0 != err)
     return err;
-  return fd_sysvar_set( slot_ctx, fd_sysvar_owner_id.key, &fd_sysvar_slot_history_id, enc, sz, slot_ctx->slot_bank.slot, 0UL );
+  return fd_sysvar_set( slot_ctx, fd_sysvar_owner_id.key, &fd_sysvar_slot_history_id, enc, sz, slot_ctx->slot_bank.slot );
 }
 
 /* https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/sdk/program/src/slot_history.rs#L16 */
@@ -117,4 +116,44 @@ fd_sysvar_slot_history_update( fd_exec_slot_ctx_t * slot_ctx ) {
   fd_slot_history_destroy( history, &ctx_d );
 
   return 0;
+}
+
+int
+fd_sysvar_slot_history_read( fd_exec_slot_ctx_t * slot_ctx,
+                            fd_valloc_t valloc, 
+                            fd_slot_history_t * out_history) {
+  /* Set current_slot, and update next_slot */
+
+  fd_pubkey_t const * key = &fd_sysvar_slot_history_id;
+
+  FD_BORROWED_ACCOUNT_DECL(rec);
+  int err = fd_acc_mgr_view( slot_ctx->acc_mgr, slot_ctx->funk_txn, key, rec);
+  if (err)
+    FD_LOG_CRIT(( "fd_acc_mgr_view(slot_history) failed: %d", err ));
+
+  fd_bincode_decode_ctx_t ctx;
+  ctx.data    = rec->const_data;
+  ctx.dataend = rec->const_data + rec->const_meta->dlen;
+  ctx.valloc  = valloc;
+  if( fd_slot_history_decode( out_history, &ctx ) )
+    FD_LOG_ERR(("fd_slot_history_decode failed"));
+  
+  return 0;
+}
+
+int
+fd_sysvar_slot_history_find_slot( fd_slot_history_t const * history,
+                                  ulong slot ) {
+  if( slot > history->next_slot - 1) {
+    return FD_SLOT_HISTORY_SLOT_FUTURE;
+  } else if ( slot < fd_ulong_sat_sub( history->next_slot, slot_history_max_entries ) ) {
+    return FD_SLOT_HISTORY_SLOT_TOO_OLD;
+  } else {
+    ulong block_idx = (slot / bits_per_block) % (history->bits.bits->blocks_len);
+    if( history->bits.bits->blocks[ block_idx ] & ( 1UL << ( slot % bits_per_block ) ) ) {
+      return FD_SLOT_HISTORY_SLOT_FOUND;
+    } else {
+      return FD_SLOT_HISTORY_SLOT_NOTFOUND;
+    }
+  }
 }

@@ -10,7 +10,7 @@
 action_t ACTIONS[ ACTIONS_CNT ] = {
   { .name = "run",        .args = NULL,               .fn = run_cmd_fn,        .perm = run_cmd_perm,        .description = "Start up a Firedancer validator" },
   { .name = "run1",       .args = run1_cmd_args,      .fn = run1_cmd_fn,       .perm = NULL,                .description = "Start up a single Firedancer tile" },
-  { .name = "run-solana", .args = NULL,               .fn = run_solana_cmd_fn, .perm = NULL,                .description = "Start up the Solana Labs side of a Firedancer validator" },
+  { .name = "run-agave",  .args = NULL,               .fn = run_agave_cmd_fn,  .perm = NULL,                .description = "Start up the Agave side of a Firedancer validator" },
   { .name = "configure",  .args = configure_cmd_args, .fn = configure_cmd_fn,  .perm = configure_cmd_perm,  .description = "Configure the local host so it can run Firedancer correctly" },
   { .name = "monitor",    .args = monitor_cmd_args,   .fn = monitor_cmd_fn,    .perm = monitor_cmd_perm,    .description = "Monitor a locally running Firedancer instance with a terminal GUI" },
   { .name = "keys",       .args = keys_cmd_args,      .fn = keys_cmd_fn,       .perm = NULL,                .description = "Generate new keypairs for use with the validator or print a public key" },
@@ -18,6 +18,7 @@ action_t ACTIONS[ ACTIONS_CNT ] = {
   { .name = "mem",        .args = NULL,               .fn = mem_cmd_fn,        .perm = NULL,                .description = "Print workspace memory and tile topology information" },
   { .name = "spy",        .args = NULL,               .fn = spy_cmd_fn,        .perm = NULL,                .description = "Spy on and print out gossip traffic" },
   { .name = "help",       .args = NULL,               .fn = help_cmd_fn,       .perm = NULL,                .description = "Print this help message" },
+  { .name = "version",    .args = NULL,               .fn = version_cmd_fn,    .perm = NULL,                .description = "Show the current software version" },
 };
 
 struct action_alias {
@@ -81,7 +82,7 @@ should_colorize( void ) {
 static void
 initialize_numa_assignments( fd_topo_t * topo ) {
   /* Assign workspaces to NUMA nodes.  The heuristic here is pretty
-     simple for now: workspacess go on the NUMA node of the first
+     simple for now: workspaces go on the NUMA node of the first
      tile which maps the largest object in the workspace. */
 
   for( ulong i=0UL; i<topo->wksp_cnt; i++ ) {
@@ -150,6 +151,7 @@ fdctl_boot( int *        pargc,
             char const * log_path ) {
   fd_log_level_core_set( 5 ); /* Don't dump core for FD_LOG_ERR during boot */
   fd_log_colorize_set( should_colorize() ); /* Colorize during boot until we can determine from config */
+  fd_log_level_stderr_set( 2 ); /* Only NOTICE and above will be logged during boot until fd_log is initialized */
 
   int config_fd = fd_env_strip_cmdline_int( pargc, pargv, "--config-fd", NULL, -1 );
 
@@ -157,11 +159,11 @@ fdctl_boot( int *        pargc,
   char * thread = "";
   if( FD_UNLIKELY( config_fd >= 0 ) ) {
     copy_config_from_fd( config_fd, config );
-    /* tick_per_ns needs to be synchronized across procesess so that they
+    /* tick_per_ns needs to be synchronized across processes so that they
        can coordinate on metrics measurement. */
     fd_tempo_set_tick_per_ns( config->tick_per_ns_mu, config->tick_per_ns_sigma );
   } else {
-    config_parse( pargc, pargv, config );
+    fdctl_cfg_from_env( pargc, pargv, config );
     config->tick_per_ns_mu = fd_tempo_tick_per_ns( &config->tick_per_ns_sigma );
     config->log.lock_fd = init_log_memfd();
     config->log.log_fd  = -1;
@@ -169,6 +171,14 @@ fdctl_boot( int *        pargc,
     if( FD_UNLIKELY( log_path ) )
       strncpy( config->log.path, log_path, sizeof( config->log.path ) - 1 );
   }
+
+  char * shmem_args[ 3 ];
+  /* pass in --shmem-path value from the config */
+  shmem_args[ 0 ] = "--shmem-path";
+  shmem_args[ 1 ] = config->hugetlbfs.mount_path;
+  shmem_args[ 2 ] = NULL;
+  char ** argv = shmem_args;
+  int     argc = 2;
 
   int * log_lock = map_log_memfd( config->log.lock_fd );
   ulong pid = fd_sandbox_getpid(); /* Need to read /proc since we might be in a PID namespace now */;
@@ -199,7 +209,7 @@ fdctl_boot( int *        pargc,
                               config->log.log_fd,
                               log_path );
   config->log.log_fd = fd_log_private_logfile_fd();
-  fd_shmem_private_boot( pargc, pargv );;
+  fd_shmem_private_boot( &argc, &argv );
   fd_tile_private_boot( 0, NULL );
 
   /* Kind of a hack but initializing NUMA config depends on shmem, which
@@ -220,6 +230,20 @@ main1( int     argc,
        char ** _argv ) {
   char ** argv = _argv;
   argc--; argv++;
+
+  /* Short circuit evaluating help and version commands so that we don't
+     need to load and evaluate the entire config file to run them.
+     This is useful for some operators in CI environments where, for
+     example, they want to show the version or validate the produced
+     binary without yet setting up the full TOML. */
+
+  if( FD_UNLIKELY( argc==1 && (!strcmp( argv[ 0 ], "help" ) || !strcmp( argv[ 0 ], "--help" )) ) ) {
+    help_cmd_fn( NULL, NULL );
+    return 0;
+  } else if( FD_UNLIKELY( argc==1 && (!strcmp( argv[ 0 ], "version" ) || !strcmp( argv[ 0 ], "--version" )) ) ) {
+    version_cmd_fn( NULL, NULL );
+    return 0;
+  }
 
   fdctl_boot( &argc, &argv, &config, NULL );
 
@@ -273,7 +297,7 @@ main1( int     argc,
       } else if( FD_LIKELY( !strcmp( action->name, "configure" ) ) ) {
         FD_LOG_ERR(( "insufficient permissions to execute command `%s`. It is recommended "
                      "to configure Firedancer as the root user. Firedancer configuration requires "
-                     "root because it does privileged operating system actions like setting up XDP. "
+                     "root because it does privileged operating system actions like mounting huge page filesystems. "
                      "Configuration is a local action that does not access the network, and the process "
                      "exits immediately once configuration completes. The user that Firedancer runs "
                      "as is specified in your configuration file, and although configuration runs as root "

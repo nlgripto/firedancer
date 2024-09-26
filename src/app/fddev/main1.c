@@ -20,12 +20,15 @@ configure_stage_t * STAGES[ CONFIGURE_STAGE_COUNT ] = {
   &netns,
   &hugetlbfs,
   &sysctl,
-  &xdp,
-  &ethtool,
+  &ethtool_channels,
+  &ethtool_gro,
   &keys,
-  &workspace,
   &genesis,
+#ifdef FD_HAS_NO_AGAVE
+  NULL,
+#else
   &blockstore,
+#endif
   NULL,
 };
 
@@ -42,10 +45,19 @@ extern fd_topo_run_tile_t fd_tile_store;
 extern fd_topo_run_tile_t fd_tile_sign;
 extern fd_topo_run_tile_t fd_tile_metric;
 extern fd_topo_run_tile_t fd_tile_blackhole;
-
 extern fd_topo_run_tile_t fd_tile_bencho;
 extern fd_topo_run_tile_t fd_tile_benchg;
 extern fd_topo_run_tile_t fd_tile_benchs;
+
+#ifdef FD_HAS_NO_AGAVE
+extern fd_topo_run_tile_t fd_tile_gossip;
+extern fd_topo_run_tile_t fd_tile_repair;
+extern fd_topo_run_tile_t fd_tile_store_int;
+extern fd_topo_run_tile_t fd_tile_replay;
+extern fd_topo_run_tile_t fd_tile_replay_thread;
+extern fd_topo_run_tile_t fd_tile_poh_int;
+extern fd_topo_run_tile_t fd_tile_sender;
+#endif
 
 fd_topo_run_tile_t * TILES[] = {
   &fd_tile_net,
@@ -64,11 +76,21 @@ fd_topo_run_tile_t * TILES[] = {
   &fd_tile_bencho,
   &fd_tile_benchg,
   &fd_tile_benchs,
+#ifdef FD_HAS_NO_AGAVE
+  &fd_tile_gossip,
+  &fd_tile_repair,
+  &fd_tile_store_int,
+  &fd_tile_replay,
+  &fd_tile_replay_thread,
+  &fd_tile_poh_int,
+  &fd_tile_sender,
+#endif
   NULL,
 };
 
 static action_t DEV_ACTIONS[] = {
   { .name = "dev",     .args = dev_cmd_args,     .fn = dev_cmd_fn,     .perm = dev_cmd_perm     },
+  { .name = "wksp",    .args = NULL,             .fn = wksp_cmd_fn,    .perm = wksp_cmd_perm    },
   { .name = "dev1",    .args = dev1_cmd_args,    .fn = dev1_cmd_fn,    .perm = dev_cmd_perm     },
   { .name = "txn",     .args = txn_cmd_args,     .fn = txn_cmd_fn,     .perm = txn_cmd_perm     },
   { .name = "bench",   .args = bench_cmd_args,   .fn = bench_cmd_fn,   .perm = bench_cmd_perm   },
@@ -174,11 +196,17 @@ fddev_main( int     argc,
   if( FD_LIKELY( action->args ) ) action->args( &argc, &argv, &args );
   if( FD_UNLIKELY( argc ) ) FD_LOG_ERR(( "unknown argument `%s`", argv[ 0 ] ));
 
-  /* check if we are appropriate permissioned to run the desired command */
+  /* Check if we are appropriately permissioned to run the desired
+     command. */
   if( FD_LIKELY( action->perm ) ) {
-    fd_caps_ctx_t caps = {0};
-    action->perm( &args, &caps, &config );
-    if( FD_UNLIKELY( caps.err_cnt ) ) {
+    fd_caps_ctx_t caps[1] = {0};
+    action->perm( &args, caps, &config );
+    if( FD_UNLIKELY( caps->err_cnt ) ) {
+      if( FD_UNLIKELY( !geteuid() ) ) {
+        for( ulong i=0; i<caps->err_cnt; i++ ) FD_LOG_WARNING(( "%s", caps->err[ i ] ));
+        FD_LOG_ERR(( "insufficient permissions to execute command `%s` when running as root. "
+                     "fddev is likely being run with a reduced capability bounding set.", action_name ));
+      }
       execve_as_root( orig_argc, orig_argv );
     }
   }

@@ -7,14 +7,28 @@
 /* Max number of validators that can be known */
 #define FD_PEER_KEY_MAX (1<<14)
 
+/* Contact info v2 socket tag constants */
+#define FD_GOSSIP_SOCKET_TAG_GOSSIP             (0)
+#define FD_GOSSIP_SOCKET_TAG_RPC                (2)
+#define FD_GOSSIP_SOCKET_TAG_RPC_PUBSUB         (3)
+#define FD_GOSSIP_SOCKET_TAG_SERVE_REPAIR       (4)
+#define FD_GOSSIP_SOCKET_TAG_SERVE_REPAIR_QUIC  (1)
+#define FD_GOSSIP_SOCKET_TAG_TPU                (5)
+#define FD_GOSSIP_SOCKET_TAG_TPU_FORWARDS       (6)
+#define FD_GOSSIP_SOCKET_TAG_TPU_FORWARDS_QUIC  (7)
+#define FD_GOSSIP_SOCKET_TAG_TPU_QUIC           (8)
+#define FD_GOSSIP_SOCKET_TAG_TPU_VOTE           (9)
+#define FD_GOSSIP_SOCKET_TAG_TVU                (10)
+#define FD_GOSSIP_SOCKET_TAG_TVU_QUIC           (11)
+
 /* Global state of gossip protocol */
 typedef struct fd_gossip fd_gossip_t;
 ulong         fd_gossip_align    ( void );
 ulong         fd_gossip_footprint( void );
-void *        fd_gossip_new      ( void * shmem, ulong seed, fd_valloc_t valloc );
+void *        fd_gossip_new      ( void * shmem, ulong seed );
 fd_gossip_t * fd_gossip_join     ( void * shmap );
 void *        fd_gossip_leave    ( fd_gossip_t * join );
-void *        fd_gossip_delete   ( void * shmap, fd_valloc_t valloc );
+void *        fd_gossip_delete   ( void * shmap );
 
 
 union fd_gossip_peer_addr {
@@ -33,6 +47,16 @@ fd_gossip_from_soladdr(fd_gossip_peer_addr_t * dst, fd_gossip_socket_addr_t cons
 int
 fd_gossip_to_soladdr( fd_gossip_socket_addr_t * dst, fd_gossip_peer_addr_t const * src );
 
+
+void
+fd_gossip_contact_info_v2_to_v1( fd_gossip_contact_info_v2_t const * v2,
+                                 fd_gossip_contact_info_v1_t *       v1 );
+
+int
+fd_gossip_contact_info_v2_find_proto_ident( fd_gossip_contact_info_v2_t const * contact_info,
+                                            uchar                               proto_ident,
+                                            fd_gossip_socket_addr_t *           out_addr );
+
 /* Callback when a new message is received */
 typedef void (*fd_gossip_data_deliver_fun)(fd_crds_data_t* data, void* arg);
 
@@ -40,12 +64,13 @@ typedef void (*fd_gossip_data_deliver_fun)(fd_crds_data_t* data, void* arg);
 typedef void (*fd_gossip_send_packet_fun)( uchar const * msg, size_t msglen, fd_gossip_peer_addr_t const * addr, void * arg );
 
 /* Callback for signing */
-typedef void (*fd_gossip_sign_fun)( void * ctx, uchar * sig, uchar const * buffer, ulong len );
+typedef void (*fd_gossip_sign_fun)( void * ctx, uchar * sig, uchar const * buffer, ulong len, int sign_type );
 
 struct fd_gossip_config {
     fd_pubkey_t * public_key;
     uchar * private_key;
     fd_gossip_peer_addr_t my_addr;
+    fd_gossip_version_v2_t my_version;
     ushort shred_version;
     fd_gossip_data_deliver_fun deliver_fun;
     void * deliver_arg;
@@ -71,7 +96,9 @@ fd_gossip_update_tvu_addr( fd_gossip_t * glob, const fd_gossip_peer_addr_t * tvu
 
 /* Update the tpu addr */
 int
-fd_gossip_update_tpu_addr( fd_gossip_t * glob, const fd_gossip_peer_addr_t * tpu );
+fd_gossip_update_tpu_addr( fd_gossip_t * glob,
+                           fd_gossip_peer_addr_t const * tpu,
+                           fd_gossip_peer_addr_t const * tpu_fwd );
 
 /* Update the tpu vote addr */
 int fd_gossip_update_tpu_vote_addr( fd_gossip_t * glob, const fd_gossip_peer_addr_t * tpu_vote );
@@ -106,5 +133,9 @@ const char * fd_gossip_addr_str( char * dst, ulong dstlen, fd_gossip_peer_addr_t
 ushort fd_gossip_get_shred_version( fd_gossip_t const * glob );
 
 void fd_gossip_set_stake_weights( fd_gossip_t * gossip, fd_stake_weight_t const * stake_weights, ulong stake_weights_cnt );
+
+void fd_gossip_set_entrypoints( fd_gossip_t * gossip, uint allowed_entrypoints[static 16], ulong allowed_entrypoints_cnt, ushort * ports );
+
+uint fd_gossip_is_allowed_entrypoint( fd_gossip_t * gossip, fd_gossip_peer_addr_t * addr );
 
 #endif /* HEADER_fd_src_flamenco_gossip_fd_gossip_h */

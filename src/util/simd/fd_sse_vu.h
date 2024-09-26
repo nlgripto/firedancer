@@ -34,10 +34,15 @@ vu_bcast_wide( uint u0, uint u1 ) {
   return _mm_setr_epi32( i0, i0, i1, i1 );
 }
 
-/* vu_permute returns [ i(imm_i0) i(imm_i1) i(imm_i2) i(imm_i3) ].
+/* vu_permute returns [ x(imm_i0) x(imm_i1) x(imm_i2) x(imm_i3) ].
    imm_i* should be compile time constants in 0:3. */
 
 #define vu_permute(x,imm_i0,imm_i1,imm_i2,imm_i3) _mm_shuffle_epi32( (x), _MM_SHUFFLE( (imm_i3), (imm_i2), (imm_i1), (imm_i0) ) )
+
+/* vu_permute2 returns [ a(imm_i0) a(imm_i1) b(imm_i2) b(imm_i3) ].
+   imm_i* should be compile time constants in 0:3. */
+
+#define vu_permute2(a,b,imm_i0,imm_i1,imm_i2,imm_i3) ((vu_t)_mm_shuffle_ps( (vf_t)(a), (vf_t)(b), _MM_SHUFFLE( (imm_i3), (imm_i2), (imm_i1), (imm_i0) ) ))
 
 /* Predefined constants */
 
@@ -297,9 +302,11 @@ vu_max_all( vu_t x ) { /* Returns vu_bcast( max( x ) ) */
    of a define to keep strict type checking while working around yet
    another Intel intrinsic type mismatch issue. */
 
+#if defined(__AVX2__)
 static inline vu_t vu_gather( uint const * b, vi_t i ) {
   return _mm_i32gather_epi32( (int const *)b, (i), 4 );
 }
+#endif /* defined(__AVX2__) */
 
 /* vu_transpose_4x4 transposes the 4x4 matrix stored in vu_t r0,r1,r2,r3
    and stores the result in 4x4 matrix vu_t c0,c1,c2,c3.  All

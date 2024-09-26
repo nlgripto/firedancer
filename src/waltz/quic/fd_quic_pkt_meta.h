@@ -30,6 +30,7 @@ struct fd_quic_range {
  */
 union fd_quic_pkt_meta_key {
   union {
+#define FD_QUIC_PKT_META_STREAM_MASK ((1UL<<62UL)-1UL)
     ulong stream_id;
     struct {
       ulong flags:62;
@@ -43,6 +44,12 @@ union fd_quic_pkt_meta_key {
      { .stream_id = ( ( (ulong)(STREAM_ID) )    |      \
                       ( (ulong)(TYPE) << 62UL ) |      \
                       ( (ulong)(FLAGS) ) ) } )
+    /* FD_QUIC_PKT_META_STREAM_ID
+     * This is used to extract the stream_id, since some of the bits are used
+     * for "type".
+     * The more natural way "stream_id:62" caused compilation warnings and ugly
+     * work-arounds */
+#define FD_QUIC_PKT_META_STREAM_ID( KEY ) ( (KEY).stream_id & FD_QUIC_PKT_META_STREAM_MASK )
   };
 };
 typedef union fd_quic_pkt_meta_key fd_quic_pkt_meta_key_t;
@@ -86,7 +93,6 @@ struct fd_quic_pkt_meta {
        FD_QUIC_PKT_META_FLAGS_MAX_DATA            max_data frame
        FD_QUIC_PKT_META_FLAGS_MAX_STREAM_DATA     max_stream_data frame
        FD_QUIC_PKT_META_FLAGS_MAX_STREAMS_UNIDIR  max_streams frame (unidir)
-       FD_QUIC_PKT_META_FLAGS_MAX_STREAMS_BIDIR   max_streams frame (bidir)
        FD_QUIC_PKT_META_FLAGS_ACK                 acknowledgement
        FD_QUIC_PKT_META_FLAGS_CLOSE               close frame
        FD_QUIC_PKT_META_FLAGS_KEY_UPDATE          indicates key update was in effect

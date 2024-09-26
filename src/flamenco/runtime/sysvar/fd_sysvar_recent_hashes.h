@@ -2,7 +2,16 @@
 #define HEADER_fd_src_flamenco_runtime_sysvar_fd_recent_hashes_h
 
 #include "../../fd_flamenco_base.h"
-#include "../fd_executor.h"
+
+/* FD_SYSVAR_RECENT_HASHES_CAP is the max number of block hash entries
+   the recent blockhashes sysvar will include.
+   
+   https://github.com/anza-xyz/agave/blob/6398ddf6ab8a8f81017bf675ab315a70067f0bf0/sdk/program/src/sysvar/recent_blockhashes.rs#L32
+*/
+
+#define FD_SYSVAR_RECENT_HASHES_CAP (150UL)
+
+FD_PROTOTYPES_BEGIN
 
 /* The recent hashes sysvar */
 
@@ -14,5 +23,6 @@ fd_sysvar_recent_hashes_init( fd_exec_slot_ctx_t * slot_ctx );
 void
 fd_sysvar_recent_hashes_update( fd_exec_slot_ctx_t * slot_ctx );
 
-#endif /* HEADER_fd_src_flamenco_runtime_sysvar_fd_recent_hashes_h */
+FD_PROTOTYPES_END
 
+#endif /* HEADER_fd_src_flamenco_runtime_sysvar_fd_recent_hashes_h */

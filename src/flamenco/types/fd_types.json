@@ -3,6 +3,7 @@
   "name": "fd_runtime_types",
   "extra_header": [
       "#include \"fd_bincode.h\"",
+      "#include \"../../ballet/utf8/fd_utf8.h\"",
       "#include \"fd_types_custom.h\"",
       "#define FD_ACCOUNT_META_MAGIC 9823"
   ],
@@ -49,20 +50,6 @@
         { "name": "lamports_per_signature", "type": "ulong" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/sdk/program/src/fee_calculator.rs#L9"
-    },
-    {
-      "name": "epoch_rewards",
-      "type": "struct",
-      "fields": [
-        { "name": "distribution_starting_block_height", "type": "ulong"},
-        { "name": "num_partitions", "type": "ulong" },
-        { "name": "parent_blockhash", "type": "hash" },
-        { "name": "total_points", "type": "uint128" },
-        { "name": "total_rewards", "type": "ulong" },
-        { "name": "distributed_rewards", "type": "ulong" },
-        { "name": "active", "type": "bool" }
-      ],
-      "comment": "https://github.com/anza-xyz/agave/blob/7fcd8c03fd71418fe49459c8460ab3986a8b608a/sdk/program/src/epoch_rewards.rs#L12"
     },
     {
       "name": "hash_age",
@@ -136,7 +123,7 @@
         { "name": "taper", "type": "double" },
         { "name": "foundation", "type": "double" },
         { "name": "foundation_term", "type": "double" },
-        { "name": "__unused", "type": "double" }
+        { "name": "unused", "type": "double" }
       ]
     },
     {
@@ -156,7 +143,7 @@
       "fields": [
         { "name": "slots_per_epoch", "type": "ulong" },
         { "name": "leader_schedule_slot_offset", "type": "ulong" },
-        { "name": "warmup", "type": "uchar" },
+        { "name": "warmup", "type": "bool" },
         { "name": "first_normal_epoch", "type": "ulong" },
         { "name": "first_normal_slot", "type": "ulong" }
       ],
@@ -190,7 +177,7 @@
       "name": "stake_history",
       "type": "struct",
       "fields": [
-        { "name": "fd_stake_history", "type": "treap", "treap_t": "fd_stake_history_entry_t", "treap_query_t": "ulong", "treap_cmp": "((q == (e)->epoch) ? 0 : ((q < (e)->epoch) ? -1 : 1 ) )", "treap_lt": "((e0)->epoch<(e1)->epoch)", "max": 512, "rev": true }
+        { "name": "fd_stake_history", "type": "treap", "treap_t": "fd_stake_history_entry_t", "treap_query_t": "ulong", "treap_cmp": "((q == (e)->epoch) ? 0 : ((q < (e)->epoch) ? -1 : 1 ) )", "treap_lt": "((e0)->epoch<(e1)->epoch)", "min": 512, "rev": true }
       ],
       "comment": "https://github.com/firedancer-io/solana/blob/v1.17/sdk/program/src/stake_history.rs#L12-L75"
     },
@@ -201,9 +188,10 @@
         { "name": "lamports", "type": "ulong" },
         { "name": "data", "type": "vector", "element": "uchar" },
         { "name": "owner", "type": "pubkey" },
-        { "name": "executable", "type": "uchar" },
+        { "name": "executable", "type": "bool" },
         { "name": "rent_epoch", "type": "ulong" }
-      ]
+      ],
+      "comment": "https://github.com/anza-xyz/agave/blob/6ac4fe32e28d8ceb4085072b61fa0c6cb09baac1/sdk/src/account.rs#L37"
     },
     {
       "name": "solana_account_stored_meta",
@@ -256,7 +244,7 @@
       "fields": [
         { "name": "key", "type": "pubkey" },
         { "name": "stake", "type": "ulong" },
-        { "name": "value", "type": "solana_account" }
+        { "name": "value", "type": "solana_vote_account" }
       ]
     },
     {
@@ -318,6 +306,23 @@
       ]
     },
     {
+      "name": "stake",
+      "type": "struct",
+      "fields": [
+        { "name": "delegation", "type": "delegation" },
+        { "name": "credits_observed", "type": "ulong" }
+      ],
+      "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/sdk/program/src/stake/state.rs#L539"
+    },
+    {
+      "name": "stake_pair",
+      "type": "struct",
+      "fields": [
+        { "name": "account", "type": "pubkey" },
+        { "name": "stake", "type": "stake" }
+      ]
+    },
+    {
       "name": "stakes",
       "type": "struct",
       "fields": [
@@ -327,7 +332,19 @@
         { "name": "epoch", "type": "ulong" },
         { "name": "stake_history", "type": "stake_history" }
       ],
-      "comment": "https://github.com/solana-labs/solana/blob/88aeaa82a856fc807234e7da0b31b89f2dc0e091/runtime/src/stakes.rs#L147"
+      "comment": "https://github.com/anza-xyz/agave/blob/beb3f582f784a96e59e06ef8f34e855258bcd98c/runtime/src/stakes.rs#L202"
+    },
+    {
+      "name": "stakes_stake",
+      "type": "struct",
+      "fields": [
+        { "name": "vote_accounts", "type": "vote_accounts" },
+        { "name": "stake_delegations", "type": "map", "element": "stake_pair", "key": "account" },
+        { "name": "unused", "type": "ulong" },
+        { "name": "epoch", "type": "ulong" },
+        { "name": "stake_history", "type": "stake_history" }
+      ],
+      "comment": "https://github.com/anza-xyz/agave/blob/beb3f582f784a96e59e06ef8f34e855258bcd98c/runtime/src/stakes.rs#L202"
     },
     {
       "name": "bank_incremental_snapshot_persistence",
@@ -492,50 +509,7 @@
         { "name": "staking" },
         { "name": "voting" }
       ],
-      "comment": "https://github.com/firedancer-io/solana/blob/de02601d73d626edf98ef63efd772824746f2f33/sdk/src/reward_type.rs#L5-L11"
-    },
-    {
-      "name": "reward_info",
-      "type": "struct",
-      "fields": [
-        { "name": "reward_type", "type": "reward_type" },
-        { "name": "lamports", "type": "ulong" },
-        { "name": "staker_rewards", "type": "ulong" },
-        { "name": "new_credits_observed", "type": "ulong" },
-        { "name": "post_balance", "type": "ulong" },
-        { "name": "commission", "type": "long" }
-      ]
-    },
-    {
-      "name": "stake_reward",
-      "type": "struct",
-      "fields": [
-        { "name": "stake_pubkey", "type": "pubkey" },
-        { "name": "reward_info", "type": "reward_info" }
-      ]
-    },
-    {
-      "name": "serializable_stake_rewards",
-      "type": "struct",
-      "fields": [
-        { "name": "body", "type": "vector", "element": "stake_reward" }
-      ]
-    },
-    {
-      "name": "start_block_height_and_rewards",
-      "type": "struct",
-      "fields": [
-        { "name": "start_block_height", "type": "ulong" },
-        { "name": "stake_rewards_by_partition", "type": "vector", "element": "serializable_stake_rewards" }
-      ]
-    },
-    {
-      "name": "serializable_epoch_reward_status",
-      "type": "enum",
-      "variants": [
-          { "name": "Active", "type": "start_block_height_and_rewards"},
-          { "name": "Inactive"}
-      ]
+      "comment": "https://github.com/anza-xyz/agave/blob/7117ed9653ce19e8b2dea108eff1f3eb6a3378a7/sdk/src/reward_type.rs#L7"
     },
     {
       "name": "solana_accounts_db_fields",
@@ -551,6 +525,42 @@
       "comment": "Accounts DB related fields in a snapshot"
     },
     {
+      "name": "epoch_stakes_current",
+      "type": "struct",
+      "fields": [
+        { "name": "stakes", "type": "stakes_stake" },
+        { "name": "total_stake", "type": "ulong" },
+        { "name": "node_id_to_vote_accounts", "type": "vector", "element": "pubkey_node_vote_accounts_pair" },
+        { "name": "epoch_authorized_voters", "type": "vector", "element": "pubkey_pubkey_pair" }
+      ]
+    },
+    {
+      "name": "versioned_epoch_stakes",
+      "type": "enum",
+      "variants": [
+          { "name": "Current", "type": "epoch_stakes_current"}
+      ]
+    },
+    {
+      "name": "versioned_epoch_stakes_pair",
+      "type": "struct",
+      "fields": [
+        { "name": "epoch", "type": "ulong" },
+        { "name": "val", "type": "versioned_epoch_stakes" }
+      ]
+    },
+    {
+      "name": "reward_info",
+      "type": "struct",
+      "fields": [
+        { "name": "reward_type", "type": "reward_type" },
+        { "name": "lamports", "type": "ulong" },
+        { "name": "post_balance", "type": "ulong" },
+        { "name": "commission", "type": "ulong" }
+      ],
+      "comment": "https://github.com/anza-xyz/agave/blob/7117ed9653ce19e8b2dea108eff1f3eb6a3378a7/sdk/src/reward_info.rs#L5"
+    },
+    {
       "name": "solana_manifest",
       "type": "struct",
       "alignment": "16",
@@ -560,7 +570,7 @@
         { "name": "lamports_per_signature",                "type": "ulong" },
         { "name": "bank_incremental_snapshot_persistence", "type": "option", "element": "bank_incremental_snapshot_persistence", "ignore_underflow": true },
         { "name": "epoch_account_hash",                    "type": "option", "element": "hash",                                  "ignore_underflow": true },
-        { "name": "epoch_reward_status",                   "type": "option", "element": "serializable_epoch_reward_status",      "ignore_underflow": true }
+        { "name": "versioned_epoch_stakes",                "type": "vector", "element": "versioned_epoch_stakes_pair",           "ignore_underflow": true }
       ]
     },
     {
@@ -584,7 +594,7 @@
       "name": "string_pubkey_pair",
       "type": "struct",
       "fields": [
-        { "name": "string", "type": "char*" },
+        { "name": "string", "type": "string" },
         { "name": "pubkey", "type": "pubkey" }
       ]
     },
@@ -697,7 +707,7 @@
       "type": "struct",
       "fields": [
         { "name": "slot", "type": "ulong" },
-        { "name": "timestamp", "type": "ulong" }
+        { "name": "timestamp", "type": "long" }
       ]
     },
     {
@@ -738,9 +748,9 @@
           { "name": "prior_voters", "type": "vote_prior_voters_0_23_5" },
           { "name": "authorized_withdrawer", "type": "pubkey" },
           { "name": "commission", "type": "uchar" },
-          { "name": "votes", "type": "deque", "element": "vote_lockout", "max":1228 },
+          { "name": "votes", "type": "deque", "element": "vote_lockout", "min": 32 },
           { "name": "root_slot", "type": "option", "element": "ulong", "flat": true },
-          { "name": "epoch_credits", "type": "deque", "element": "vote_epoch_credits", "max":100 },
+          { "name": "epoch_credits", "type": "deque", "element": "vote_epoch_credits", "min": 64 },
           { "name": "last_timestamp", "type": "vote_block_timestamp" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/programs/vote/src/vote_state/vote_state_0_23_5.rs#L6"
@@ -749,7 +759,7 @@
       "name": "vote_authorized_voters",
       "type": "struct",
       "fields": [
-          { "name": "fd_vote_authorized_voters", "type": "treap", "treap_t": "fd_vote_authorized_voter_t", "treap_query_t": "ulong", "treap_cmp": "( (q == (e)->epoch) ? 0 : ( (q < (e)->epoch) ? -1 : 1 ) )", "treap_lt": "((e0)->epoch<(e1)->epoch)", "max": 64, "upsert": true }
+          { "name": "fd_vote_authorized_voters", "type": "treap", "treap_t": "fd_vote_authorized_voter_t", "treap_query_t": "ulong", "treap_cmp": "( (q == (e)->epoch) ? 0 : ( (q < (e)->epoch) ? -1 : 1 ) )", "treap_lt": "((e0)->epoch<(e1)->epoch)", "min": 64, "upsert": true }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/programs/vote/src/vote_state/mod.rs#L310"
     },
@@ -760,11 +770,11 @@
           { "name": "node_pubkey", "type": "pubkey" },
           { "name": "authorized_withdrawer", "type": "pubkey" },
           { "name": "commission", "type": "uchar" },
-          { "name": "votes", "type": "deque", "element": "vote_lockout", "max":1228 },
+          { "name": "votes", "type": "deque", "element": "vote_lockout", "min": 32 },
           { "name": "root_slot", "type": "option", "element": "ulong", "flat": true },
           { "name": "authorized_voters", "type": "vote_authorized_voters" },
           { "name": "prior_voters", "type": "vote_prior_voters" },
-          { "name": "epoch_credits", "type": "deque", "element": "vote_epoch_credits", "max":64 },
+          { "name": "epoch_credits", "type": "deque", "element": "vote_epoch_credits", "min": 64 },
           { "name": "last_timestamp", "type": "vote_block_timestamp" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/programs/vote/src/vote_state/mod.rs#L310"
@@ -776,11 +786,11 @@
           { "name": "node_pubkey", "type": "pubkey" },
           { "name": "authorized_withdrawer", "type": "pubkey" },
           { "name": "commission", "type": "uchar" },
-          { "name": "votes", "type": "deque", "element": "landed_vote", "max":35 },
+          { "name": "votes", "type": "deque", "element": "landed_vote", "min": 32 },
           { "name": "root_slot", "type": "option", "element": "ulong", "flat": true },
           { "name": "authorized_voters", "type": "vote_authorized_voters" },
           { "name": "prior_voters", "type": "vote_prior_voters" },
-          { "name": "epoch_credits", "type": "deque", "element": "vote_epoch_credits", "max":100 },
+          { "name": "epoch_credits", "type": "deque", "element": "vote_epoch_credits", "min": 64 },
           { "name": "last_timestamp", "type": "vote_block_timestamp" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/programs/vote/src/vote_state/mod.rs#L310"
@@ -800,10 +810,10 @@
       "name": "vote_state_update",
       "type": "struct",
       "fields": [
-        { "name": "lockouts", "type": "deque", "element": "vote_lockout", "max": 1228 },
+        { "name": "lockouts", "type": "deque", "element": "vote_lockout", "min": 32 },
         { "name": "root", "type": "option", "element": "ulong", "flat": true },
         { "name": "hash", "type": "hash" },
-        { "name": "timestamp", "type": "option", "element": "ulong" }
+        { "name": "timestamp", "type": "option", "element": "long" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/programs/vote/src/vote_state/mod.rs#L185"
     },
@@ -814,7 +824,7 @@
           { "name": "root", "type": "ulong" },
           { "name": "lockouts", "type": "vector", "element": "lockout_offset", "modifier": "compact" },
           { "name": "hash", "type": "hash" },
-          { "name": "timestamp", "type": "option", "element": "ulong" }
+          { "name": "timestamp", "type": "option", "element": "long" }
       ]
     },
     {
@@ -827,14 +837,27 @@
       "comment": "https://github.com/solana-labs/solana/blob/252438e28fbfb2c695fe1215171b83456e4b761c/programs/vote/src/vote_instruction.rs#L143"
     },
     {
-      "name": "tower_sync",
+      "name": "compact_tower_sync",
       "type": "struct",
       "fields": [
-        { "name": "lockouts", "type": "array", "element": "vote_lockout", "length": 32 },
+        { "name": "root", "type": "ulong" },
+        { "name": "lockout_offsets", "type": "deque", "element": "lockout_offset", "modifier": "compact" , "min": 32, "max": 100, "comment": "100 is the max packet length / sizeof(vote_lockout)" },
+        { "name": "hash", "type": "hash" },
+        { "name": "timestamp", "type": "option", "element": "long", "flat": true },
+        { "name": "block_id", "type": "hash" }
+      ],
+      "comment": "https://github.com/anza-xyz/agave/blob/20ee70cd1829cd414d09040460defecf9792a370/sdk/program/src/vote/state/mod.rs#L990"
+    },
+    {
+      "name": "tower_sync",
+      "type": "struct",
+      "encoders": false,
+      "fields": [
+        { "name": "lockouts", "type": "deque", "element": "vote_lockout" },
         { "name": "lockouts_cnt", "type": "ulong" },
         { "name": "root", "type": "option", "element": "ulong", "flat": true },
         { "name": "hash", "type": "hash" },
-        { "name": "timestamp", "type": "option", "element": "ulong", "flat": true },
+        { "name": "timestamp", "type": "option", "element": "long", "flat": true },
         { "name": "block_id", "type": "hash" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/programs/vote/src/vote_state/mod.rs#L185"
@@ -885,7 +908,7 @@
       "name": "slot_hashes",
       "type": "struct",
       "fields": [
-          { "name": "hashes", "type": "deque", "element": "slot_hash", "max":512 }
+          { "name": "hashes", "type": "deque", "element": "slot_hash", "min": 512 }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/sdk/program/src/slot_hashes.rs#L31"
     },
@@ -901,7 +924,7 @@
       "name": "recent_block_hashes",
       "type": "struct",
       "fields": [
-          { "name": "hashes", "type": "deque", "element": "block_block_hash_entry", "max":350 }
+          { "name": "hashes", "type": "deque", "element": "block_block_hash_entry", "min": 151 }
       ]
     },
     {
@@ -911,7 +934,7 @@
           { "name": "slot", "type": "ulong" },
           { "name": "consumed", "type": "ulong" },
           { "name": "received", "type": "ulong" },
-          { "name": "first_shred_timestamp", "type": "ulong" },
+          { "name": "first_shred_timestamp", "type": "long" },
           { "name": "last_index", "type": "ulong" },
           { "name": "parent_slot", "type": "ulong" },
           { "name": "next_slot", "type": "vector", "element": "ulong"},
@@ -949,9 +972,15 @@
       "name": "sysvar_epoch_rewards",
       "type": "struct",
       "fields": [
-        { "name": "epoch_rewards", "type": "epoch_rewards" }
+        { "name": "distribution_starting_block_height", "type": "ulong" },
+        { "name": "num_partitions", "type": "ulong" },
+        { "name": "parent_blockhash", "type": "hash" },
+        { "name": "total_points", "type": "uint128" },
+        { "name": "total_rewards", "type": "ulong" },
+        { "name": "distributed_rewards", "type": "ulong" },
+        { "name": "active", "type": "bool" }
       ],
-      "comment": "https://github.com/solana-labs/solana/blob/a02aebaa4b3aa0b24e13644cf0ffa5ae8bd47e7b/sdk/program/src/sysvar/epoch_rewards.rs"
+      "comment": "https://github.com/anza-xyz/agave/blob/cbc8320d35358da14d79ebcada4dfb6756ffac79/sdk/program/src/epoch_rewards.rs#L14"
     },
     {
       "name": "config_keys_pair",
@@ -977,7 +1006,7 @@
       "type": "struct",
       "fields": [
         { "name": "pubkey", "type": "pubkey" },
-        { "name": "description", "type": "char*" },
+        { "name": "description", "type": "string" },
         { "name": "since_slot", "type": "ulong" }
       ]
     },
@@ -1013,8 +1042,19 @@
       ]
     },
     {
+      "name": "cluster_type",
+      "type": "enum",
+      "variants": [
+        { "name": "Testnet" },
+        { "name": "MainnetBeta" },
+        { "name": "Devnet" },
+        { "name": "Development" }
+      ]
+    },
+    {
       "name": "epoch_bank",
       "type": "struct",
+      "archival": "true",
       "alignment": "16",
       "fields": [
         { "name": "stakes",                "type": "stakes" },
@@ -1032,35 +1072,38 @@
         { "name": "eah_interval",          "type": "ulong" },
         { "name": "genesis_hash",          "type": "hash" },
         { "name": "cluster_type",          "type": "uint" },
+        { "name": "cluster_version",       "type": "uint" },
         { "name": "next_epoch_stakes",     "type": "vote_accounts"}
       ]
     },
     {
       "name": "slot_bank",
       "type": "struct",
+      "archival": "true",
       "alignment": "16",
       "fields": [
-        { "name": "recent_block_hashes",   "type": "recent_block_hashes" },
-        { "name": "timestamp_votes",       "type": "clock_timestamp_votes" },
-        { "name": "slot",                  "type": "ulong" },
-        { "name": "prev_slot",             "type": "ulong" },
-        { "name": "poh",                   "type": "hash" },
-        { "name": "banks_hash",            "type": "hash" },
-        { "name": "epoch_account_hash",    "type": "hash" },
-        { "name": "fee_rate_governor",     "type": "fee_rate_governor" },
-        { "name": "capitalization",        "type": "ulong" },
-        { "name": "block_height",          "type": "ulong" },
-        { "name": "max_tick_height",       "type": "ulong" },
-        { "name": "collected_fees",        "type": "ulong" },
-        { "name": "collected_rent",        "type": "ulong" },
-        { "name": "epoch_stakes",          "type": "vote_accounts" },
-        { "name": "last_restart_slot",     "type": "sol_sysvar_last_restart_slot" },
-        { "name": "stake_account_keys",    "type": "stake_accounts"},
-        { "name": "vote_account_keys",     "type": "vote_accounts" },
-        { "name": "lamports_per_signature","type": "ulong" },
-        { "name": "transaction_count",     "type": "ulong" },
-        { "name": "lthash",                "type": "uchar[2048]" },
-        { "name": "block_hash_queue",      "type": "block_hash_queue" }
+        { "name": "recent_block_hashes",       "type": "recent_block_hashes" },
+        { "name": "timestamp_votes",           "type": "clock_timestamp_votes" },
+        { "name": "slot",                      "type": "ulong" },
+        { "name": "prev_slot",                 "type": "ulong" },
+        { "name": "poh",                       "type": "hash" },
+        { "name": "banks_hash",                "type": "hash" },
+        { "name": "epoch_account_hash",        "type": "hash" },
+        { "name": "fee_rate_governor",         "type": "fee_rate_governor" },
+        { "name": "capitalization",            "type": "ulong" },
+        { "name": "block_height",              "type": "ulong" },
+        { "name": "max_tick_height",           "type": "ulong" },
+        { "name": "collected_execution_fees",  "type": "ulong" },
+        { "name": "collected_priority_fees",   "type": "ulong" },
+        { "name": "collected_rent",            "type": "ulong" },
+        { "name": "epoch_stakes",              "type": "vote_accounts" },
+        { "name": "last_restart_slot",         "type": "sol_sysvar_last_restart_slot" },
+        { "name": "stake_account_keys",        "type": "stake_accounts"},
+        { "name": "vote_account_keys",         "type": "vote_accounts" },
+        { "name": "lamports_per_signature",    "type": "ulong" },
+        { "name": "transaction_count",         "type": "ulong" },
+        { "name": "lthash",                    "type": "uchar[2048]" },
+        { "name": "block_hash_queue",          "type": "block_hash_queue" }
       ]
     },
     {
@@ -1077,9 +1120,9 @@
       "name": "vote",
       "type": "struct",
       "fields": [
-        { "name": "slots", "type": "deque", "element": "ulong", "max":35 },
+        { "name": "slots", "type": "deque", "element": "ulong" },
         { "name": "hash", "type": "hash" },
-        { "name": "timestamp", "type": "option", "element": "ulong" }
+        { "name": "timestamp", "type": "option", "element": "long" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/programs/vote/src/vote_state/mod.rs#L133"
     },
@@ -1136,7 +1179,7 @@
       "fields": [
         { "name": "authorization_type", "type": "vote_authorize" },
         { "name": "current_authority_derived_key_owner", "type": "pubkey" },
-        { "name": "current_authority_derived_key_seed", "type": "vector", "element": "uchar" },
+        { "name": "current_authority_derived_key_seed", "type": "string" },
         { "name": "new_authority", "type": "pubkey" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/programs/vote/src/vote_state/mod.rs#L244"
@@ -1147,7 +1190,7 @@
       "fields": [
         { "name": "authorization_type", "type": "vote_authorize" },
         { "name": "current_authority_derived_key_owner", "type": "pubkey" },
-        { "name": "current_authority_derived_key_seed", "type": "vector", "element": "uchar" }
+        { "name": "current_authority_derived_key_seed", "type": "string" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/programs/vote/src/vote_state/mod.rs#L252"
     },
@@ -1189,7 +1232,7 @@
       "type": "struct",
       "fields": [
         { "name": "base", "type": "pubkey" },
-        { "name": "seed", "type": "vector", "element": "uchar" },
+        { "name": "seed", "type": "string" },
         { "name": "lamports", "type": "ulong" },
         { "name": "space", "type": "ulong" },
         { "name": "owner", "type": "pubkey" }
@@ -1201,7 +1244,7 @@
       "type": "struct",
       "fields": [
         { "name": "base", "type": "pubkey" },
-        { "name": "seed", "type": "vector", "element": "uchar" },
+        { "name": "seed", "type": "string" },
         { "name": "space", "type": "ulong" },
         { "name": "owner", "type": "pubkey" }
       ],
@@ -1212,7 +1255,7 @@
       "type": "struct",
       "fields": [
         { "name": "base", "type": "pubkey" },
-        { "name": "seed", "type": "vector", "element": "uchar" },
+        { "name": "seed", "type": "string" },
         { "name": "owner", "type": "pubkey" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/sdk/program/src/system_instruction.rs#L288"
@@ -1222,7 +1265,7 @@
       "type": "struct",
       "fields": [
         { "name": "lamports", "type": "ulong" },
-        { "name": "from_seed", "type": "vector", "element": "uchar" },
+        { "name": "from_seed", "type": "string" },
         { "name": "from_owner", "type": "pubkey" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/sdk/program/src/system_instruction.rs#L288"
@@ -1325,7 +1368,7 @@
       "fields": [
         { "name": "new_authorized_pubkey", "type": "pubkey" },
         { "name": "stake_authorize", "type": "stake_authorize" },
-        { "name": "authority_seed", "type": "vector", "element": "uchar" },
+        { "name": "authority_seed", "type": "string" },
         { "name": "authority_owner", "type": "pubkey" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/sdk/program/src/stake/instruction.rs#L241"
@@ -1335,7 +1378,7 @@
       "type": "struct",
       "fields": [
         { "name": "stake_authorize", "type": "stake_authorize" },
-        { "name": "authority_seed", "type": "vector", "element": "uchar" },
+        { "name": "authority_seed", "type": "string" },
         { "name": "authority_owner", "type": "pubkey" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/sdk/program/src/stake/instruction.rs#L249"
@@ -1344,7 +1387,7 @@
       "name": "lockup_checked_args",
       "type": "struct",
       "fields": [
-        { "name": "unix_timestamp", "type": "option", "element": "ulong" },
+        { "name": "unix_timestamp", "type": "option", "element": "long" },
         { "name": "epoch", "type": "option", "element": "ulong" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/sdk/program/src/stake/instruction.rs#L235"
@@ -1353,7 +1396,7 @@
       "name": "lockup_args",
       "type": "struct",
       "fields": [
-        { "name": "unix_timestamp", "type": "option", "element": "ulong" },
+        { "name": "unix_timestamp", "type": "option", "element": "long" },
         { "name": "epoch", "type": "option", "element": "ulong" },
         { "name": "custodian", "type": "option", "element": "pubkey" }
       ],
@@ -1378,9 +1421,11 @@
         { "name": "set_lockup_checked", "type": "lockup_checked_args" },
         { "name": "get_minimum_delegation" },
         { "name": "deactivate_delinquent" },
-        { "name": "redelegate" }
+        { "name": "redelegate" },
+        { "name": "move_stake", "type": "ulong" },
+        { "name": "move_lamports", "type": "ulong" }
       ],
-      "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/sdk/program/src/stake/instruction.rs#L58"
+      "comment": "https://github.com/anza-xyz/agave/blob/cdff19c7807b006dd63429114fb1d9573bf74172/sdk/program/src/stake/instruction.rs#L96"
     },
     {
       "name": "stake_meta",
@@ -1391,15 +1436,6 @@
         { "name": "lockup", "type": "stake_lockup" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/sdk/program/src/stake/state.rs#L248"
-    },
-    {
-      "name": "stake",
-      "type": "struct",
-      "fields": [
-        { "name": "delegation", "type": "delegation" },
-        { "name": "credits_observed", "type": "ulong" }
-      ],
-      "comment": "https://github.com/solana-labs/solana/blob/8f2c8b8388a495d2728909e30460aa40dcc5d733/sdk/program/src/stake/state.rs#L539"
     },
     {
       "name": "stake_flags",
@@ -1492,7 +1528,7 @@
       "name": "config_keys",
       "type": "struct",
       "fields": [
-        { "name": "keys", "type": "vector", "element": "config_keys_pair", "modifier": "compact", "max":35 }
+        { "name": "keys", "type": "vector", "element": "config_keys_pair", "modifier": "compact" }
       ],
       "comment": "https://github.com/solana-labs/solana/blob/a03ae63daff987912c48ee286eb8ee7e8a84bf01/programs/config/src/lib.rs#L32"
     },
@@ -1616,7 +1652,7 @@
       "type": "struct",
       "fields": [
         { "name": "frozen_hash", "type": "hash" },
-        { "name": "frozen_status", "type": "uchar" }
+        { "name": "is_duplicate_confirmed", "type": "bool" }
       ],
       "comment": "https://github.com/firedancer-io/solana/blob/f4b7c54f9e021b40cfc7cbd32dc12b19dedbe791/ledger/src/blockstore_meta.rs#L178"
     },
@@ -1869,7 +1905,7 @@
       "fields": [
         { "name": "from", "type": "pubkey" },
         { "name": "wallclock", "type": "ulong" },
-        { "name": "timestamp", "type": "ulong" },
+        { "name": "timestamp", "type": "long" },
         { "name": "token", "type": "ulong" }
       ]
     },
@@ -2044,7 +2080,7 @@
         { "name": "signature", "type": "signature" },
         { "name": "sender", "type": "pubkey" },
         { "name": "recipient", "type": "pubkey" },
-        { "name": "timestamp", "type": "ulong" },
+        { "name": "timestamp", "type": "long" },
         { "name": "nonce", "type": "uint" }
       ]
     },
@@ -2106,6 +2142,403 @@
       "variants": [
         { "name": "ping", "type": "gossip_ping" }
       ]
+    },
+    {
+      "name": "instr_error_enum",
+      "type": "enum",
+      "variants": [
+        {
+          "name": "generic_error"
+        },
+        {
+          "name": "invalid_argument"
+        },
+        {
+          "name": "invalid_instruction_data"
+        },
+        {
+          "name": "invalid_account_data"
+        },
+        {
+          "name": "account_data_too_small"
+        },
+        {
+          "name": "insufficient_funds"
+        },
+        {
+          "name": "incorrect_program_id"
+        },
+        {
+          "name": "missing_required_signature"
+        },
+        {
+          "name": "account_already_initialized"
+        },
+        {
+          "name": "uninitialized_account"
+        },
+        {
+          "name": "unbalanced_instruction"
+        },
+        {
+          "name": "modified_program_id"
+        },
+        {
+          "name": "external_account_lamport_spend"
+        },
+        {
+          "name": "external_account_data_modified"
+        },
+        {
+          "name": "readonly_lamport_change"
+        },
+        {
+          "name": "readonly_data_modified"
+        },
+        {
+          "name": "duplicate_account_index"
+        },
+        {
+          "name": "executable_modified"
+        },
+        {
+          "name": "rent_epoch_modified"
+        },
+        {
+          "name": "not_enough_account_keys"
+        },
+        {
+          "name": "account_data_size_changed"
+        },
+        {
+          "name": "account_not_executable"
+        },
+        {
+          "name": "account_borrow_failed"
+        },
+        {
+          "name": "account_borrow_outstanding"
+        },
+        {
+          "name": "duplicate_account_out_of_sync"
+        },
+        {
+          "name": "custom",
+          "type": "uint"
+        },
+        {
+          "name": "invalid_error"
+        },
+        {
+          "name": "executable_data_modified"
+        },
+        {
+          "name": "executable_lamport_change"
+        },
+        {
+          "name": "executable_account_not_rent_exempt"
+        },
+        {
+          "name": "unsupported_program_id"
+        },
+        {
+          "name": "call_depth"
+        },
+        {
+          "name": "missing_account"
+        },
+        {
+          "name": "reentrancy_not_allowed"
+        },
+        {
+          "name": "max_seed_length_exceeded"
+        },
+        {
+          "name": "invalid_seeds"
+        },
+        {
+          "name": "invalid_realloc"
+        },
+        {
+          "name": "computational_budget_exceeded"
+        },
+        {
+          "name": "privilege_escalation"
+        },
+        {
+          "name": "program_environment_setup_failure"
+        },
+        {
+          "name": "program_failed_to_complete"
+        },
+        {
+          "name": "program_failed_to_compile"
+        },
+        {
+          "name": "immutable"
+        },
+        {
+          "name": "incorrect_authority"
+        },
+        {
+          "name": "borsh_io_error",
+          "type": "char*"
+        },
+        {
+          "name": "account_not_rent_exempt"
+        },
+        {
+          "name": "invalid_account_owner"
+        },
+        {
+          "name": "arithmetic_overflow"
+        },
+        {
+          "name": "unsupported_sysvar"
+        },
+        {
+          "name": "illegal_owner"
+        },
+        {
+          "name": "max_accounts_data_allocations_exceeded"
+        },
+        {
+          "name": "max_accounts_exceeded"
+        },
+        {
+          "name": "max_instruction_trace_length_exceeded"
+        },
+        {
+          "name": "builtin_programs_must_consume_compute_units"
+        }
+      ]
+    },
+    {
+      "name": "txn_instr_error",
+      "type": "struct",
+      "fields": [
+        { "name": "instr_idx", "type": "uchar" },
+        { "name": "error", "type": "instr_error_enum" }
+      ]
+    },
+    {
+      "name": "txn_error_enum",
+      "type": "enum",
+      "variants": [
+        {
+          "name": "account_in_use"
+        },
+        {
+          "name": "account_loaded_twice"
+        },
+        {
+          "name": "account_not_found"
+        },
+        {
+          "name": "program_account_not_found"
+        },
+        {
+          "name": "insufficient_funds_for_fee"
+        },
+        {
+          "name": "invalid_account_for_fee"
+        },
+        {
+          "name": "already_processed"
+        },
+        {
+          "name": "blockhash_not_found"
+        },
+        {
+          "name": "instruction_error",
+          "type": "txn_instr_error"
+        },
+        {
+          "name": "call_chain_too_deep"
+        },
+        {
+          "name": "missing_signature_for_fee"
+        },
+        {
+          "name": "invalid_account_index"
+        },
+        {
+          "name": "signature_failure"
+        },
+        {
+          "name": "invalid_program_for_execution"
+        },
+        {
+          "name": "sanitize_failure"
+        },
+        {
+          "name": "cluster_maintenance"
+        },
+        {
+          "name": "account_borrow_outstanding"
+        },
+        {
+          "name": "would_exceed_max_block_cost_limit"
+        },
+        {
+          "name": "unsupported_version"
+        },
+        {
+          "name": "invalid_writable_account"
+        },
+        {
+          "name": "would_exceed_max_account_cost_limit"
+        },
+        {
+          "name": "would_exceed_account_data_block_limit"
+        },
+        {
+          "name": "too_many_account_locks"
+        },
+        {
+          "name": "address_lookup_table_not_found"
+        },
+        {
+          "name": "invalid_address_lookup_table_owner"
+        },
+        {
+          "name": "invalid_address_lookup_table_data"
+        },
+        {
+          "name": "invalid_address_lookup_table_index"
+        },
+        {
+          "name": "invalid_rent_paying_account"
+        },
+        {
+          "name": "would_exceed_max_vote_cost_limit"
+        },
+        {
+          "name": "would_exceed_account_data_total_limit"
+        },
+        {
+          "name": "duplicate_instruction",
+          "type": "uchar"
+        },
+        {
+          "name": "insufficient_funds_for_rent",
+          "type": "uchar"
+        },
+        {
+          "name": "max_loaded_accounts_data_size_exceeded"
+        },
+        {
+          "name": "invalid_loaded_accounts_data_size_limit"
+        },
+        {
+          "name": "resanitization_needed"
+        },
+        {
+          "name": "program_execution_temporarily_restricted",
+          "type": "uchar"
+        },
+        {
+          "name": "unbalanced_transaction"
+        }
+      ]
+    },
+    {
+      "name": "txn_result",
+      "type": "enum",
+      "variants": [
+        {
+          "name": "ok"
+        },
+        {
+          "name": "error",
+          "type": "txn_error_enum"
+        }
+      ]
+    },
+    {
+      "name": "cache_status",
+      "type": "struct",
+      "fields": [
+        { "name": "key_slice", "type": "array", "element": "uchar", "length": 20 },
+        { "name": "result", "type": "txn_result" }
+      ]
+    },
+    {
+      "name": "status_value",
+      "type": "struct",
+      "fields": [
+        { "name": "txn_idx", "type": "ulong" },
+        { "name": "statuses", "type": "vector", "element": "cache_status"}
+      ]
+    },
+    {
+      "name": "status_pair",
+      "type": "struct",
+      "fields": [
+        { "name": "hash", "type": "hash" },
+        { "name": "value", "type": "status_value" }
+      ]
+    },
+    {
+      "name": "slot_delta",
+      "type": "struct",
+      "fields": [
+        { "name": "slot", "type": "ulong" },
+        { "name": "is_root", "type": "bool" },
+        { "name": "slot_delta_vec", "type": "vector", "element": "status_pair" }
+      ]
+    },
+    {
+      "name": "bank_slot_deltas",
+      "type": "struct",
+      "fields": [
+        { "name": "slot_deltas", "type": "vector", "element": "slot_delta" }
+      ]
+    },
+    {
+      "name": "pubkey_rewardinfo_pair",
+      "type": "struct",
+      "fields": [
+        { "name": "pubkey", "type": "pubkey" },
+        { "name": "reward_info", "type": "reward_info" }
+      ],
+      "comment": "https://github.com/anza-xyz/agave/blob/7117ed9653ce19e8b2dea108eff1f3eb6a3378a7/runtime/src/bank/partitioned_epoch_rewards/mod.rs#L85"
+    },
+    {
+      "name": "optional_account",
+      "type": "struct",
+      "fields": [
+        { "name": "account", "type": "option", "element": "solana_account" }
+      ]
+    },
+    {
+      "name": "calculated_stake_points",
+      "type": "struct",
+      "fields": [
+        { "name": "points", "type": "uint128" },
+        { "name": "new_credits_observed", "type": "ulong" },
+        { "name": "force_credits_update_with_skipped_reward", "type": "uchar" }
+      ],
+      "comment": "https://github.com/anza-xyz/agave/blob/cbc8320d35358da14d79ebcada4dfb6756ffac79/programs/stake/src/points.rs#L27"
+    },
+    {
+      "name": "point_value",
+      "type": "struct",
+      "fields": [
+        { "name": "rewards", "type": "ulong" },
+        { "name": "points", "type": "uint128" }
+      ],
+      "comment": "https://github.com/anza-xyz/agave/blob/cbc8320d35358da14d79ebcada4dfb6756ffac79/programs/stake/src/points.rs#L21"
+    },
+    {
+      "name": "calculated_stake_rewards",
+      "type": "struct",
+      "fields": [
+        { "name": "staker_rewards", "type": "ulong" },
+        { "name": "voter_rewards", "type": "ulong" },
+        { "name": "new_credits_observed", "type": "ulong" }
+      ],
+      "comment": "https://github.com/anza-xyz/agave/blob/cbc8320d35358da14d79ebcada4dfb6756ffac79/programs/stake/src/rewards.rs#L24"
     }
   ]
 }

@@ -3,47 +3,10 @@
 #include "../fd_executor.h"
 #include "../fd_system_ids.h"
 #include "../context/fd_exec_instr_ctx.h"
+#include "../context/fd_exec_txn_ctx.h"
 #include "../context/fd_exec_slot_ctx.h"
 
 #define FD_SYSVAR_CACHE_MAGIC (0x195a0e78828cacd5UL)
-
-/* Reuse this table to avoid code duplication */
-#define FD_SYSVAR_CACHE_ITER(X) \
-  X( fd_sol_sysvar_clock,             clock               ) \
-  X( fd_epoch_schedule,               epoch_schedule      ) \
-  X( fd_sysvar_epoch_rewards,         epoch_rewards       ) \
-  X( fd_sysvar_fees,                  fees                ) \
-  X( fd_rent,                         rent                ) \
-  X( fd_slot_hashes,                  slot_hashes         ) \
-  X( fd_recent_block_hashes,          recent_block_hashes ) \
-  X( fd_stake_history,                stake_history       ) \
-  X( fd_sol_sysvar_last_restart_slot, last_restart_slot   )
-
-/* The memory of fd_sysvar_cache_t fits as much sysvar information into
-   the struct as possible.  Unfortunately some parts of the sysvar
-   spill out onto the heap due to how the type generator works.
-
-   The has_{...} bits specify whether a sysvar logically exists.
-   The val_{...} structs contain the top-level struct of each sysvar.
-   If has_{...}==0 then any heap pointers in val_{...} are NULL,
-   allowing for safe idempotent calls to fd_sol_sysvar_{...}_destroy() */
-
-struct __attribute__((aligned(16UL))) fd_sysvar_cache_private {
-  ulong       magic;  /* ==FD_SYSVAR_CACHE_MAGIC */
-  fd_valloc_t valloc;
-
-  /* Declare the val_{...} values */
-# define X( type, name ) \
-  type##_t val_##name[1];
-  FD_SYSVAR_CACHE_ITER(X)
-# undef X
-
-  /* Declare the has_{...} bits */
-# define X( _type, name ) \
-  ulong has_##name : 1;
-  FD_SYSVAR_CACHE_ITER(X)
-# undef X
-};
 
 ulong
 fd_sysvar_cache_align( void ) {
@@ -193,3 +156,23 @@ fd_sysvar_cache_restore( fd_sysvar_cache_t * cache,
   }
   FD_SYSVAR_CACHE_ITER(X)
 # undef X
+
+/* https://github.com/anza-xyz/agave/blob/77daab497df191ef485a7ad36ed291c1874596e5/program-runtime/src/sysvar_cache.rs#L223-L234 */
+int
+fd_check_sysvar_account( fd_exec_instr_ctx_t const * ctx,
+                         ulong                       insn_acc_idx,
+                         fd_pubkey_t const *         expected_id ) {
+  uchar const *       instr_acc_idxs = ctx->instr->acct_txn_idxs;
+  fd_pubkey_t const * txn_accs       = ctx->txn_ctx->accounts;
+
+  if( insn_acc_idx>=ctx->instr->acct_cnt ) {
+    return FD_EXECUTOR_INSTR_ERR_NOT_ENOUGH_ACC_KEYS;
+  }
+
+  fd_pubkey_t const * insn_acc_key = &txn_accs[ instr_acc_idxs[ insn_acc_idx ] ];
+
+  if( memcmp( expected_id, insn_acc_key, sizeof(fd_pubkey_t) ) ) {
+    return FD_EXECUTOR_INSTR_ERR_INVALID_ARG;
+  }
+  return FD_EXECUTOR_INSTR_SUCCESS;
+}

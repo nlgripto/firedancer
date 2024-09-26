@@ -5,17 +5,18 @@
 
 rep_fd_ledger_dump="$FIREDANCER/dump"
 rep_temp_ledger_upload="$FIREDANCER/.ledger-min"
-rep_run_ledger_tests="src/flamenco/runtime/tests/run_ledger_tests.sh"
+rep_page_cnt=75
 
 if [ -z "$ROOT_DIR" ]; then
   ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 fi
+source $ROOT_DIR/utils.sh
 
 rm -rf "$rep_fd_ledger_dump"
 mkdir -p "$rep_fd_ledger_dump"
-cp -r "$LEDGER_MIN" "$rep_fd_ledger_dump"
+cp -rL "$LEDGER_MIN" "$rep_fd_ledger_dump"
 
-rep_snapshot=$(find "$LEDGER_MIN" -type f -name "snapshot-*" | head -n 1)
+rep_snapshot=$(find -L "$LEDGER_MIN" -type f -name "snapshot-*" | head -n 1)
 rep_snapshot_basename=$(basename "$rep_snapshot")
 rep_ledger_min_basename=$(basename "$LEDGER_MIN")
 
@@ -27,12 +28,44 @@ fi
 
 cd "$FIREDANCER" || exit
 set -x
-replay_output=$("$rep_run_ledger_tests" -l "$rep_ledger_min_basename" -s "$rep_snapshot_basename" -e "$END_SLOT" -p $GIGANTIC_PAGES -m $INDEX_MAX 2>&1)
+
+rep_replay_start_time=$(date +%s)
+
+replay_output=$(build/native/gcc/bin/fd_ledger --cmd replay \
+                                                --rocksdb dump/$rep_ledger_min_basename/rocksdb \
+                                                --index-max $INDEX_MAX \
+                                                --end-slot $END_SLOT \
+                                                --cluster-version $FIREDANCER_CLUSTER_VERSION \
+                                                --funk-only 1 \
+                                                --txn-max 100 \
+                                                --page-cnt $rep_page_cnt \
+                                                --funk-page-cnt $GIGANTIC_PAGES \
+                                                --verify-acc-hash 1 \
+                                                --snapshot dump/$rep_ledger_min_basename/$rep_snapshot_basename \
+                                                --slot-history 5000 \
+                                                --allocator wksp \
+                                                --on-demand-block-ingest 1 \
+                                                --tile-cpus 5-21 2>&1)
+
+rep_replay_end_time=$(date +%s)
+echo "replay_start_slot=$START_SLOT" > dump/$rep_ledger_min_basename/metadata
+echo "replay_time=$((rep_replay_end_time - rep_replay_start_time))" >> dump/$rep_ledger_min_basename/metadata
+epoch=$(slot_to_epoch $START_SLOT $NETWORK)
+echo "epoch=$epoch" >> dump/$rep_ledger_min_basename/metadata
+
 set +x
 echo "$replay_output"
 
-rep_mismatch_slot=$(echo "$replay_output" | grep -oP "Bank hash mismatch! slot=\K\d+")
-rep_mismatch_msg=$(echo "$replay_output" | grep -o "Bank hash mismatch!.*")
+rep_mismatch_slot=$(echo "$replay_output" | grep -oP "(PoH|Bank) hash mismatch! slot=\K\d+")
+rep_mismatch_msg=$(echo "$replay_output" | grep -oP "(PoH|Bank) hash mismatch!.*")
+rep_mismatch_ledger_basename="$NETWORK-$rep_mismatch_slot.tar.gz"
+rep_mismatch_ledger_dir="$NETWORK-$rep_mismatch_slot"
+
+if gsutil -q stat "$UPLOAD_URL/$rep_mismatch_ledger_basename"; then
+  echo "[~] Mismatched ledger $UPLOAD_URL/$rep_mismatch_ledger_basename already uploaded"
+  START_SLOT=$((rep_mismatch_slot + 1))
+  return
+fi
 
 if [ -z "$rep_mismatch_slot" ]; then
   echo "[+] ledger test success"
@@ -47,16 +80,16 @@ else
   echo "[-] mismatch_msg: $rep_mismatch_msg"
 
   if [ -n "$UPLOAD_URL" ]; then
-    # Minimize to one block around the mismatch block by locating the mismatch slot
-    # And then calling minify with the exact bounds [bhm-1, bhm+1]
-    rep_mismatch_start=$((rep_mismatch_slot - 1))
+    # Minimize to bounds (bhm-3, bhm+3)
+    rep_mismatch_start=$((rep_mismatch_slot - 3))
     if [ "$rep_mismatch_start" -lt "$START_SLOT" ]; then
       rep_mismatch_start=$START_SLOT
-    fi
-    rep_mismatch_end=$((rep_mismatch_slot + 1))
+    fi      
+    rep_mismatch_end=$((rep_mismatch_slot + 3))
     if [ "$rep_mismatch_end" -gt "$END_SLOT" ]; then
       rep_mismatch_end=$END_SLOT
     fi
+    
     rm -rf "$rep_temp_ledger_upload"
     mkdir -p "$rep_temp_ledger_upload"
     set -x
@@ -64,14 +97,14 @@ else
       MODE=exact \
       LEDGER=$LEDGER_MIN \
       LEDGER_MIN=$rep_temp_ledger_upload \
-      IS_VERIFY=false \
       SLOTS_IN_EPOCH=$SLOTS_IN_EPOCH \
       START_SLOT=$rep_mismatch_start \
       END_SLOT=$rep_mismatch_end \
       SOLANA_LEDGER_TOOL=$SOLANA_LEDGER_TOOL \
       FIREDANCER=$FIREDANCER \
+      GIGANTIC_PAGES=$GIGANTIC_PAGES \
       $ROOT_DIR/minify.sh
-    rep_minify_status=$?
+    rep_minify_status=$?    
     set +x
     if [ $rep_minify_status -ne 0 ]; then
       echo "[-] failed to minify ledger around mismatch slot $rep_mismatch_slot for upload"
@@ -80,13 +113,16 @@ else
 
     # Upload the ledger to gcloud storage
     # Bucket key activation is already handled by the run_ledger_tests script
-    echo "[~] Compressing $rep_temp_ledger_upload to $FIREDANCER/$NETWORK-$rep_mismatch_slot.tar.gz"
-    tar -czvf $FIREDANCER/$NETWORK-$rep_mismatch_slot.tar.gz $rep_temp_ledger_upload
-    echo "[~] Uploading $FIREDANCER/$NETWORK-$rep_mismatch_slot.tar.gz to $UPLOAD_URL"
-    /bin/gsutil cp -r "$FIREDANCER/$NETWORK-$rep_mismatch_slot.tar.gz" $UPLOAD_URL
-
-    # Set new values of START_SLOT for the next iteration; END_SLOT does not change
-    # this is used for `ledger_conformance all --mode exact --repetitions multiple` and ignored in other cases
-    START_SLOT=$((rep_mismatch_slot + 1))
+    echo "[~] Compressing $rep_temp_ledger_upload to $FIREDANCER/$rep_mismatch_ledger_basename"
+    cd $rep_temp_ledger_upload
+    mkdir $rep_mismatch_ledger_dir && mv * $rep_mismatch_ledger_dir
+    tar -czvf $rep_mismatch_ledger_basename $rep_mismatch_ledger_dir
+    echo "[~] Uploading $rep_mismatch_ledger_basename to $UPLOAD_URL"
+    gsutil -o GSUtil:parallel_composite_upload_threshold=150M cp "$rep_mismatch_ledger_basename" $UPLOAD_URL
+    cd "$FIREDANCER" || exit
   fi
+  
+  # Set new values of START_SLOT for the next iteration; END_SLOT does not change
+  # this is used for `ledger_conformance all --mode exact --repetitions multiple` and ignored in other cases
+  START_SLOT=$((rep_mismatch_slot + 1))
 fi

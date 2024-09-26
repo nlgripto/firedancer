@@ -2,7 +2,7 @@
 #include "fd_exec_slot_ctx.h"
 #include "../fd_acc_mgr.h"
 #include "../fd_executor.h"
-#include "../../vm/fd_vm_context.h"
+#include "../../vm/fd_vm.h"
 
 void *
 fd_exec_txn_ctx_new( void * mem ) {
@@ -88,13 +88,17 @@ int
 fd_txn_borrowed_account_view_idx( fd_exec_txn_ctx_t * ctx,
                                   uchar idx,
                                   fd_borrowed_account_t * *  account ) {
-  if( idx >= ctx->accounts_cnt ) {
+  if( FD_UNLIKELY( idx>=ctx->accounts_cnt ) ) {
     return FD_ACC_MGR_ERR_UNKNOWN_ACCOUNT;
   }
 
-  // TODO: check if readable???
   fd_borrowed_account_t * txn_account = &ctx->borrowed_accounts[idx];
   *account = txn_account;
+
+  if( FD_UNLIKELY( !fd_acc_exists( txn_account->const_meta ) ) ) {
+    return FD_ACC_MGR_ERR_UNKNOWN_ACCOUNT;
+  }
+
   return FD_ACC_MGR_SUCCESS;
 }
 
@@ -108,8 +112,9 @@ fd_txn_borrowed_account_view( fd_exec_txn_ctx_t * ctx,
       fd_borrowed_account_t * txn_account = &ctx->borrowed_accounts[i];
       *account = txn_account;
 
-      if( FD_UNLIKELY( !fd_acc_exists( txn_account->const_meta ) ) )
+      if( FD_UNLIKELY( !fd_acc_exists( txn_account->const_meta ) ) ) {
         return FD_ACC_MGR_ERR_UNKNOWN_ACCOUNT;
+      }
 
       return FD_ACC_MGR_SUCCESS;
     }
@@ -148,7 +153,7 @@ fd_txn_borrowed_account_modify_idx( fd_exec_txn_ctx_t * ctx,
   }
 
   fd_borrowed_account_t * txn_account = &ctx->borrowed_accounts[idx];
-  if( min_data_sz > txn_account->meta->dlen ) {
+  if( min_data_sz > txn_account->const_meta->dlen ) {
     void * new_txn_account_data = fd_valloc_malloc( ctx->valloc, 8UL, min_data_sz );
     void * old_txn_account_data = fd_borrowed_account_resize( txn_account, new_txn_account_data, min_data_sz );
     if( old_txn_account_data != NULL ) {
@@ -199,8 +204,9 @@ fd_exec_txn_ctx_setup( fd_exec_txn_ctx_t * txn_ctx,
   txn_ctx->accounts_cnt       = 0;
   txn_ctx->executable_cnt     = 0;
   txn_ctx->paid_fees          = 0;
-  txn_ctx->heap_size          = FD_VM_DEFAULT_HEAP_SZ;
-  txn_ctx->loaded_accounts_data_size_limit = MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES;
+  txn_ctx->heap_size          = FD_VM_HEAP_DEFAULT;
+  txn_ctx->loaded_accounts_data_size_limit = FD_VM_LOADED_ACCOUNTS_DATA_SIZE_LIMIT;
+  txn_ctx->accounts_resize_delta = 0;
 
   txn_ctx->txn_descriptor = txn_descriptor;
   txn_ctx->_txn_raw->raw = txn_raw->raw;
@@ -213,6 +219,11 @@ fd_exec_txn_ctx_setup( fd_exec_txn_ctx_t * txn_ctx,
   txn_ctx->dirty_vote_acc  = 0;
   txn_ctx->dirty_stake_acc = 0;
   txn_ctx->failed_instr    = NULL;
+  txn_ctx->instr_err_idx   = INT_MAX;
+  txn_ctx->capture_ctx     = NULL;
+
+  txn_ctx->instr_info_cnt     = 0;
+  txn_ctx->instr_trace_length = 0;
 }
 
 void

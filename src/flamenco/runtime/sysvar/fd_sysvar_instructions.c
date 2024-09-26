@@ -1,12 +1,10 @@
 #include "fd_sysvar_instructions.h"
-#include "../fd_acc_mgr.h"
 #include "../fd_account.h"
-#include "../fd_runtime.h"
 #include "../fd_system_ids.h"
 
 static ulong
-instructions_serialized_size( fd_instr_info_t const *  instrs,
-                              ushort              instrs_cnt ) {
+instructions_serialized_size( fd_instr_info_t const *   instrs,
+                              ushort                    instrs_cnt ) {
   ulong serialized_size = 0;
 
   serialized_size += sizeof(ushort)       // num_instructions
@@ -34,9 +32,9 @@ instructions_serialized_size( fd_instr_info_t const *  instrs,
 }
 
 int
-fd_sysvar_instructions_serialize_account( fd_exec_txn_ctx_t *     txn_ctx,
-                                          fd_instr_info_t const * instrs,
-                                          ushort                  instrs_cnt ) {
+fd_sysvar_instructions_serialize_account( fd_exec_txn_ctx_t *      txn_ctx,
+                                          fd_instr_info_t const *  instrs,
+                                          ushort                   instrs_cnt ) {
   ulong serialized_sz = instructions_serialized_size( instrs, instrs_cnt );
 
   fd_borrowed_account_t * rec = NULL;

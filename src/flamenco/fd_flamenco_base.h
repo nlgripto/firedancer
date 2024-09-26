@@ -5,6 +5,7 @@
 #include "../ballet/base58/fd_base58.h"
 #include "../ballet/sha256/fd_sha256.h"
 #include "types/fd_types_custom.h"
+#include "types/fd_cast.h"
 
 #define FD_DEFAULT_SLOTS_PER_EPOCH   ( 432000UL )
 #define FD_DEFAULT_SHREDS_PER_EPOCH  ( ( 1 << 15UL ) * FD_DEFAULT_SLOTS_PER_EPOCH )
@@ -13,6 +14,12 @@
 
 #define FD_FUNK_KEY_TYPE_ACC ((uchar)1)
 #define FD_FUNK_KEY_TYPE_ELF_CACHE ((uchar)2)
+
+/* CLUSTER_VERSION is the default value for the cluster version
+   in the epoch context. This value will foll forward to the
+   latest version.
+*/
+#define FD_DEFAULT_AGAVE_CLUSTER_VERSION (2000)
 
 /* Forward declarations */
 

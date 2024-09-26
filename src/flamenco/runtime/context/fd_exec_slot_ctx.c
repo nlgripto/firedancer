@@ -19,15 +19,17 @@ fd_exec_slot_ctx_new( void *      mem,
     return NULL;
   }
 
-  fd_memset(mem, 0, FD_EXEC_SLOT_CTX_FOOTPRINT);
+  fd_memset( mem, 0, sizeof(fd_exec_slot_ctx_t) );
 
   fd_exec_slot_ctx_t * self = (fd_exec_slot_ctx_t *) mem;
   self->valloc = valloc;
   fd_slot_bank_new(&self->slot_bank);
 
-  self->latest_votes = NULL;
   self->sysvar_cache = fd_sysvar_cache_new( fd_valloc_malloc( valloc, fd_sysvar_cache_align(), fd_sysvar_cache_footprint() ), valloc );
   self->account_compute_table = fd_account_compute_table_join( fd_account_compute_table_new( fd_valloc_malloc( valloc, fd_account_compute_table_align(), fd_account_compute_table_footprint( 10000 ) ), 10000, 0 ) );
+
+  /* This is inactive by default */
+  self->epoch_reward_status.discriminant = fd_epoch_reward_status_enum_Inactive;
 
   FD_COMPILER_MFENCE();
   self->magic = FD_EXEC_SLOT_CTX_MAGIC;
@@ -91,6 +93,8 @@ fd_exec_slot_ctx_delete( void * mem ) {
 
   fd_valloc_free( hdr->valloc, fd_sysvar_cache_delete( hdr->sysvar_cache ) );
   hdr->sysvar_cache = NULL;
+  fd_valloc_free( hdr->valloc, fd_account_compute_table_delete( fd_account_compute_table_leave( hdr->account_compute_table ) ) );
+  hdr->account_compute_table = NULL;
 
   FD_COMPILER_MFENCE();
   FD_VOLATILE( hdr->magic ) = 0UL;
@@ -116,40 +120,15 @@ recover_clock( fd_exec_slot_ctx_t * slot_ctx ) {
        n = fd_vote_accounts_pair_t_map_successor( vote_accounts_pool, n ) ) {
     /* Extract vote timestamp of account */
 
-    fd_vote_block_timestamp_t vote_state_timestamp;
-    FD_SCRATCH_SCOPE_BEGIN {
-      /* Deserialize content */
-      fd_vote_state_versioned_t vs[1];
-      fd_bincode_decode_ctx_t decode =
-          { .data    = n->elem.value.data,
-            .dataend = n->elem.value.data + n->elem.value.data_len,
-            .valloc  = fd_scratch_virtual() };
-      int decode_err = fd_vote_state_versioned_decode( vs, &decode );
-      if( FD_UNLIKELY( decode_err!=FD_BINCODE_SUCCESS ) ) {
-        FD_LOG_WARNING(( "fd_vote_state_versioned_decode failed (%d)", decode_err ));
-        return 0;
-      }
+    fd_vote_block_timestamp_t vote_state_timestamp = {
+      .timestamp = n->elem.value.last_timestamp_ts,
+      .slot      = n->elem.value.last_timestamp_slot
+    };
 
-      switch( vs->discriminant )
-      {
-      case fd_vote_state_versioned_enum_current:
-        vote_state_timestamp = vs->inner.current.last_timestamp;
-        break;
-      case fd_vote_state_versioned_enum_v0_23_5:
-        vote_state_timestamp = vs->inner.v0_23_5.last_timestamp;
-        break;
-      case fd_vote_state_versioned_enum_v1_14_11:
-        vote_state_timestamp = vs->inner.v1_14_11.last_timestamp;
-        break;
-      default:
-        __builtin_unreachable();
-      }
-
-      /* Record timestamp */
-      if( vote_state_timestamp.slot != 0 || n->elem.stake != 0 ) {
-        fd_vote_record_timestamp_vote_with_slot(slot_ctx, &n->elem.key, vote_state_timestamp.timestamp, vote_state_timestamp.slot);
-      }
-    } FD_SCRATCH_SCOPE_END;
+    /* Record timestamp */
+    if( vote_state_timestamp.slot != 0 || n->elem.stake != 0 ) {
+      fd_vote_record_timestamp_vote_with_slot(slot_ctx, &n->elem.key, vote_state_timestamp.timestamp, vote_state_timestamp.slot);
+    }
   }
 
   return 1;
@@ -193,6 +172,7 @@ fd_exec_slot_ctx_recover_( fd_exec_slot_ctx_t *   slot_ctx,
   fd_memcpy(&slot_bank->banks_hash, &oldbank->hash, sizeof(oldbank->hash));
   fd_memcpy(&slot_bank->fee_rate_governor, &oldbank->fee_rate_governor, sizeof(oldbank->fee_rate_governor));
   slot_bank->lamports_per_signature = oldbank->fee_calculator.lamports_per_signature;
+  slot_ctx->prev_lamports_per_signature = oldbank->fee_calculator.lamports_per_signature;
   if( oldbank->hashes_per_tick )
     epoch_bank->hashes_per_tick = *oldbank->hashes_per_tick;
   else
@@ -210,7 +190,9 @@ fd_exec_slot_ctx_recover_( fd_exec_slot_ctx_t *   slot_ctx,
     slot_bank->epoch_account_hash = *manifest->epoch_account_hash;
 
   slot_bank->collected_rent = oldbank->collected_rent;
-  slot_bank->collected_fees = oldbank->collector_fees;
+  // did they not change the bank?!
+  slot_bank->collected_execution_fees = oldbank->collector_fees;
+  slot_bank->collected_priority_fees = 0;
   slot_bank->capitalization = oldbank->capitalization;
   slot_bank->block_height = oldbank->block_height;
   slot_bank->transaction_count = oldbank->transaction_count;
@@ -286,8 +268,11 @@ fd_exec_slot_ctx_recover_( fd_exec_slot_ctx_t *   slot_ctx,
 
     fd_vote_accounts_pair_t_mapnode_t * pool = stakes1->stakes.vote_accounts.vote_accounts_pool;
     fd_vote_accounts_pair_t_mapnode_t * root = stakes1->stakes.vote_accounts.vote_accounts_root;
-    ulong next_sz = fd_vote_accounts_pair_t_map_size( pool, root );
-    epoch_bank->next_epoch_stakes.vote_accounts_pool = fd_vote_accounts_pair_t_map_join( fd_vote_accounts_pair_t_map_new( fd_exec_epoch_ctx_next_epoch_stakes_mem( slot_ctx->epoch_ctx ), next_sz ) );
+
+    // Delete all nodes from existing
+    fd_vote_accounts_pair_t_map_release_tree( epoch_bank->next_epoch_stakes.vote_accounts_pool, epoch_bank->next_epoch_stakes.vote_accounts_root );
+
+    epoch_bank->next_epoch_stakes.vote_accounts_pool = fd_exec_epoch_ctx_next_epoch_stakes_join( slot_ctx->epoch_ctx );
     epoch_bank->next_epoch_stakes.vote_accounts_root = NULL;
 
     for ( fd_vote_accounts_pair_t_mapnode_t * n = fd_vote_accounts_pair_t_map_minimum(pool, root); n; n = fd_vote_accounts_pair_t_map_successor(pool, n) ) {
@@ -324,6 +309,83 @@ fd_exec_slot_ctx_recover( fd_exec_slot_ctx_t *   slot_ctx,
   return res;
 }
 
+fd_exec_slot_ctx_t *
+fd_exec_slot_ctx_recover_status_cache( fd_exec_slot_ctx_t *    ctx,
+                                       fd_bank_slot_deltas_t * slot_deltas ) {
+  fd_txncache_t * status_cache = ctx->status_cache;
+  if( !status_cache ) {
+    FD_LOG_WARNING(("No status cache in slot ctx"));
+    return NULL;
+  }
+
+  FD_SCRATCH_SCOPE_BEGIN {
+    ulong num_entries = 0;
+    for( ulong i = 0; i < slot_deltas->slot_deltas_len; i++ ) {
+      fd_slot_delta_t * slot_delta = &slot_deltas->slot_deltas[i];
+      for( ulong j = 0; j < slot_delta->slot_delta_vec_len; j++ ) {
+        num_entries += slot_delta->slot_delta_vec[j].value.statuses_len;
+      }
+    }
+    fd_txncache_insert_t * insert_vals = fd_scratch_alloc( alignof(fd_txncache_insert_t), num_entries * sizeof(fd_txncache_insert_t) );
+
+    /* Dumb sort for 300 slot entries to insert in order. */
+    fd_slot_delta_t ** deltas = fd_scratch_alloc(alignof(fd_slot_delta_t *), slot_deltas->slot_deltas_len * sizeof(fd_slot_delta_t *));
+
+    ulong curr = 0;
+    for( ulong i = 0; i < slot_deltas->slot_deltas_len; i++ ) {
+      ulong curr_min = ULONG_MAX;
+      ulong curr_min_idx = ULONG_MAX;
+      for( ulong j = 0; j < slot_deltas->slot_deltas_len; j++ ) {
+        fd_slot_delta_t * slot_delta = &slot_deltas->slot_deltas[j];
+        if( slot_delta->slot <= curr ) continue;
+
+        if( curr_min > slot_delta->slot ) {
+          curr_min = slot_delta->slot;
+          curr_min_idx = j;
+        }
+      }
+      deltas[i] = &slot_deltas->slot_deltas[curr_min_idx];
+      curr = slot_deltas->slot_deltas[curr_min_idx].slot;
+    }
+
+    ulong idx = 0;
+    for( ulong i = 0; i < slot_deltas->slot_deltas_len; i++ ) {
+      fd_slot_delta_t * slot_delta = deltas[i];
+      ulong slot = slot_delta->slot;
+      if( slot_delta->is_root ) {
+        fd_txncache_register_root_slot( ctx->status_cache, slot );
+      }
+      for( ulong j = 0; j < slot_delta->slot_delta_vec_len; j++ ) {
+        fd_status_pair_t * pair = &slot_delta->slot_delta_vec[j];
+        fd_hash_t * blockhash = &pair->hash;
+
+        for( ulong k = 0; k < pair->value.statuses_len; k++ ) {
+          fd_cache_status_t * status = &pair->value.statuses[k];
+          uchar result = (uchar)status->result.discriminant;
+          insert_vals[idx++] = (fd_txncache_insert_t){
+            .blockhash = blockhash->uc,
+            .slot = slot,
+            .txnhash = status->key_slice,
+            .result = &result
+          };
+        }
+      }
+    }
+    fd_txncache_insert_batch( ctx->status_cache, insert_vals, num_entries );
+
+    for( ulong i = 0; i < slot_deltas->slot_deltas_len; i++ ) {
+      fd_slot_delta_t * slot_delta = deltas[i];
+      ulong slot = slot_delta->slot;
+      for( ulong j = 0; j < slot_delta->slot_delta_vec_len; j++ ) {
+        fd_status_pair_t * pair = &slot_delta->slot_delta_vec[j];
+        fd_hash_t * blockhash = &pair->hash;
+        fd_txncache_set_txnhash_offset( ctx->status_cache, slot, blockhash->uc, pair->value.txn_idx );
+      }
+    }
+  } FD_SCRATCH_SCOPE_END;
+  return ctx;
+}
+
 void
 fd_exec_slot_ctx_free( fd_exec_slot_ctx_t * slot_ctx ) {
   fd_bincode_destroy_ctx_t ctx;
@@ -334,10 +396,5 @@ fd_exec_slot_ctx_free( fd_exec_slot_ctx_t * slot_ctx ) {
   fd_slot_hashes_destroy( slot_ctx->sysvar_cache_old.slot_hashes, &ctx );
 
   /* leader points to a caller-allocated leader schedule */
-
-  /* free vec in stake rewards*/
-  if( NULL != slot_ctx->epoch_reward_status.stake_rewards_by_partition )
-    fd_stake_rewards_vector_destroy( slot_ctx->epoch_reward_status.stake_rewards_by_partition );
-
   fd_exec_slot_ctx_delete( fd_exec_slot_ctx_leave( slot_ctx ) );
 }

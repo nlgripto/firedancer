@@ -5,11 +5,10 @@
 
 name: Coverage Report (ClusterFuzz)
 on:
-  schedule:
-    - cron: 30 11 * * *
-  workflow_dispatch:
+  workflow_call:
 jobs:
   coverage-report-clusterfuzz:
+    timeout-minutes: 30
     name: Coverage Report (ClusterFuzz)
     runs-on: ubuntu-latest
     env:
@@ -17,6 +16,8 @@ jobs:
       EXTRAS: llvm-cov
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: ./.github/actions/deps
 
@@ -44,3 +45,4 @@ jobs:
           name: dist-cov-report-cf
           functionalities: search
           flags: clusterfuzz
+          token: ${{ secrets.CODECOV_TOKEN }}

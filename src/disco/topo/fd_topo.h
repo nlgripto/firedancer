@@ -90,7 +90,7 @@ typedef struct {
   ulong id;                     /* The ID of this tile.  Indexed from [0, tile_cnt).  When placed in a topology, the ID must be the index of the tile in the tiles list. */
   char  name[ 7UL ];            /* The name of this tile.  There can be multiple of each tile name in a topology. */
   ulong kind_id;                /* The ID of this tile within its name.  If there are n tile of a particular name, they have IDs [0, N).  The pair (name, kind_id) uniquely identifies a tile, as does "id" on its own. */
-  int   is_labs;                /* If the tile needs to run in the Solana Labs (Anza) address space or not. */
+  int   is_agave;               /* If the tile needs to run in the Agave (Anza) address space or not. */
 
   ulong cpu_idx;                /* The CPU index to pin the tile on.  A value of ULONG_MAX or more indicates the tile should be floating and not pinned to a core. */
 
@@ -124,24 +124,28 @@ typedef struct {
        may point to the link, if there are multiple consumers.  An fseq
        can be uniquely identified via (link_id, tile_id), or (link_kind,
        link_kind_id, tile_kind, tile_kind_id) */
-    ulong *    in_link_fseq[ FD_TOPO_MAX_TILE_IN_LINKS ]; 
+    ulong *    in_link_fseq[ FD_TOPO_MAX_TILE_IN_LINKS ];
   };
 
   /* Configuration fields.  These are required to be known by the topology so it can determine the
      total size of Firedancer in memory. */
   union {
     struct {
-      char   app_name[ 256 ];
       char   interface[ 16 ];
       ulong  xdp_rx_queue_size;
       ulong  xdp_tx_queue_size;
       ulong  xdp_aio_depth;
+      char   xdp_mode[4];
+      int    zero_copy;
       uint   src_ip_addr;
       uchar  src_mac_addr[6];
 
       ushort shred_listen_port;
       ushort quic_transaction_listen_port;
       ushort legacy_transaction_listen_port;
+      ushort gossip_listen_port;
+      ushort repair_intake_listen_port;
+      ushort repair_serve_listen_port;
     } net;
 
     struct {
@@ -150,7 +154,6 @@ typedef struct {
       ulong  max_concurrent_connections;
       ulong  max_concurrent_handshakes;
       ulong  max_inflight_quic_packets;
-      ulong  tx_buf_size;
       ulong  max_concurrent_streams_per_connection;
       ulong  stream_pool_cnt;
       uint   ip_addr;
@@ -189,12 +192,44 @@ typedef struct {
     } shred;
 
     struct {
+      int disable_blockstore;
+    } store;
+
+    struct {
       char   identity_key_path[ PATH_MAX ];
     } sign;
 
     struct {
       ushort prometheus_listen_port;
     } metric;
+
+    struct {
+
+      /* specified by [tiles.replay] */
+
+      char  blockstore_checkpt[ PATH_MAX ];
+      int   blockstore_publish;
+      char  capture[ PATH_MAX ];
+      char  funk_checkpt[ PATH_MAX ];
+      ulong funk_rec_max;
+      ulong funk_sz_gb;
+      ulong funk_txn_max;
+      char  genesis[ PATH_MAX ];
+      char  incremental[ PATH_MAX ];
+      char  slots_replayed[ PATH_MAX ];
+      char  snapshot[ PATH_MAX ];
+      char  status_cache[ PATH_MAX ];
+      ulong tpool_thread_count;
+      uint  cluster_version;
+
+      /* not specified by [tiles.replay] */
+
+      char  identity_key_path[ PATH_MAX ];
+      uint  ip_addr;
+      uchar src_mac_addr[ 6 ];
+      int   vote;
+      char  vote_account_path[ PATH_MAX ];
+    } replay;
 
     struct {
       ushort send_to_port;
@@ -211,6 +246,57 @@ typedef struct {
     struct {
       ulong accounts_cnt;
     } benchg;
+
+    /* Firedancer-only tile configs */
+
+    struct {
+      ushort  gossip_listen_port;
+      ulong   entrypoints_cnt;
+      uint    entrypoints[16];
+      ulong   peer_ports_cnt;
+      ushort  peer_ports[16];
+
+      uint    ip_addr;
+      uchar   src_mac_addr[ 6 ];
+      char    identity_key_path[ PATH_MAX ];
+      ushort  tvu_port;
+      ushort  tvu_fwd_port;
+      ushort  tpu_port;
+      ushort  tpu_vote_port;
+      ulong   expected_shred_version;
+    } gossip;
+
+    struct {
+      ushort  repair_intake_listen_port;
+      ushort  repair_serve_listen_port;
+
+      /* non-config */
+
+      uint    ip_addr;
+      uchar   src_mac_addr[ 6 ];
+      char    identity_key_path[ PATH_MAX ];
+    } repair;
+
+    struct {
+      char  blockstore_restore[ PATH_MAX ];
+      char  slots_pending[PATH_MAX];
+
+      /* non-config */
+
+      char  identity_key_path[ PATH_MAX ];
+      char  shred_cap_archive[ PATH_MAX ];
+      char  shred_cap_replay[ PATH_MAX ];
+    } store_int;
+
+    struct {
+      ushort  tpu_listen_port;
+
+      /* non-config */
+
+      uint    ip_addr;
+      uchar   src_mac_addr[ 6 ];
+      char  identity_key_path[ PATH_MAX ];
+    } sender;
   };
 } fd_topo_tile_t;
 
@@ -247,6 +333,7 @@ typedef struct {
   ulong                         mux_flags;
   ulong                         burst;
   ulong                         rlimit_file_cnt;
+  int                           for_tpool;
   void * (*mux_ctx           )( void * scratch );
 
   fd_mux_during_housekeeping_fn * mux_during_housekeeping;
@@ -265,6 +352,7 @@ typedef struct {
   ulong (*loose_footprint         )( fd_topo_tile_t const * tile );
   void  (*privileged_init         )( fd_topo_t * topo, fd_topo_tile_t * tile, void * scratch );
   void  (*unprivileged_init       )( fd_topo_t * topo, fd_topo_tile_t * tile, void * scratch );
+  int   (*main                    )( void );
 } fd_topo_run_tile_t;
 
 FD_PROTOTYPES_BEGIN
@@ -333,6 +421,30 @@ fd_topo_find_link( fd_topo_t const * topo,
                    ulong             kind_id ) {
   for( ulong i=0; i<topo->link_cnt; i++ ) {
     if( FD_UNLIKELY( !strcmp( topo->links[ i ].name, name ) ) && topo->links[ i ].kind_id == kind_id ) return i;
+  }
+  return ULONG_MAX;
+}
+
+FD_FN_PURE static inline ulong
+fd_topo_find_tile_in_link( fd_topo_t const *      topo,
+                           fd_topo_tile_t const * tile,
+                           char const *           name,
+                           ulong                  kind_id ) {
+  for( ulong i=0; i<tile->in_cnt; i++ ) {
+    if( FD_UNLIKELY( !strcmp( topo->links[ tile->in_link_id[ i ] ].name, name ) )
+        && topo->links[ tile->in_link_id[ i ] ].kind_id == kind_id ) return i;
+  }
+  return ULONG_MAX;
+}
+
+FD_FN_PURE static inline ulong
+fd_topo_find_tile_out_link( fd_topo_t const *      topo,
+                           fd_topo_tile_t const * tile,
+                           char const *           name,
+                           ulong                  kind_id ) {
+  for( ulong i=0; i<tile->out_cnt; i++ ) {
+    if( FD_UNLIKELY( !strcmp( topo->links[ tile->out_link_id[ i ] ].name, name ) )
+        && topo->links[ tile->out_link_id[ i ] ].kind_id == kind_id ) return i;
   }
   return ULONG_MAX;
 }
@@ -419,7 +531,7 @@ fd_topo_join_workspaces( fd_topo_t *  topo,
 
 /* Leave (unmap from the process) the shared memory needed for the
    given workspace in the topology, if it was previously mapped.
-   
+
    topo and wksp are assumed non-NULL.  It is OK if the workspace
    has not been previously joined, in which case this is a no-op. */
 
@@ -444,7 +556,7 @@ fd_topo_leave_workspaces( fd_topo_t * topo );
    Returns 0 on success and -1 on failure, with errno set to the error.
    The only reason for failure currently that will be returned is
    ENOMEM, as other unexpected errors will cause the program to exit.
-   
+
    If update_existing is 1, the workspace will not be created from
    scratch but it will be assumed that it already exists from a prior
    run and needs to be maybe resized and then have the header
@@ -484,25 +596,14 @@ fd_topo_wksp_apply( fd_topo_t *      topo,
 void
 fd_topo_fill( fd_topo_t * topo );
 
-/* fd_topo_tile_stack_new creates a new huge page optimized stack for
-   provided tile.  The stack is placed in a workspace in the hugetlbfs
-   mount.
-   
-   If optimize is 1, fd_topo_tile_stack_new creates a new huge page
-   optimized stack for the provided tile.  The stack will be placed
-   in a workspace in the hugetlbfs, with a name determined by the
-   provided app_name, tile_name, and tile_kind_id arguments.
-   
-   If optimize is 0, fd_topo_tile_stack_new creates a new regular
-   page backed stack, which is not placed in the hugetlbfs.  In
-   this case cpu_idx and the other arguments are ignored. */
+/* fd_topo_tile_stack_join joins a huge page optimized stack for the
+   provided tile.  The stack is assumed to already exist at a known
+   path in the hugetlbfs mount. */
 
 void *
-fd_topo_tile_stack_new( int          optimize,
-                        char const * app_name,
-                        char const * tile_name,
-                        ulong        tile_kind_id,
-                        ulong        cpu_idx );
+fd_topo_tile_stack_join( char const * app_name,
+                         char const * tile_name,
+                         ulong        tile_kind_id );
 
 /* fd_topo_run_single_process runs all the tiles in a single process
    (the calling process).  This spawns a thread for each tile, switches
@@ -517,21 +618,21 @@ fd_topo_tile_stack_new( int          optimize,
    calling thread will also switch to the provided UID and GID before
    it returns.
 
-   In production, when running with a Solana Labs child process this is
-   used for spawning certain tiles inside the Solana Labs address space.
+   In production, when running with an Agave child process this is
+   used for spawning certain tiles inside the Agave address space.
    It's also useful for tooling and debugging, but is not how the main
    production Firedancer process runs.  For production, each tile is run
    in its own address space with a separate process and full security
    sandbox.
-   
-   The solana_labs argument determines which tiles are started.  If the
-   argument is 0 or 1, only non-labs (or only labs) tiles are started.
+
+   The agave argument determines which tiles are started.  If the
+   argument is 0 or 1, only non-agave (or only agave) tiles are started.
    If the argument is any other value, all tiles in the topology are
-   started regardless of if they are Solana Labs tiles or not. */
+   started regardless of if they are Agave tiles or not. */
 
 void
 fd_topo_run_single_process( fd_topo_t * topo,
-                            int         solana_labs,
+                            int         agave,
                             uint        uid,
                             uint        gid,
                             fd_topo_run_tile_t (* tile_run )( fd_topo_tile_t * tile ),
@@ -541,7 +642,7 @@ fd_topo_run_single_process( fd_topo_t * topo,
    process (and thread).  The function will never return, as tiles are
    expected to run forever.  An error is logged and the application will
    exit if the tile exits.
-   
+
    The sandbox argument determines if the current process will be
    sandboxed fully before starting the tile.  The thread will switch to
    the UID and GID provided before starting the tile, even if the thread
@@ -549,14 +650,14 @@ fd_topo_run_single_process( fd_topo_t * topo,
    a process must share a UID and GID, this is not the case on Linux.
    The thread will switch to the provided UID and GID without switching
    the other threads in the process.
-   
+
    The allow_fd argument is only used if sandbox is true, and is a file
    descriptor which will be allowed to exist in the process.  Normally
    the sandbox code rejects and aborts if there is an unexpected file
    descriptor present on boot.  This is helpful to allow a parent
    process to be notified on termination of the tile by waiting for a
    pipe file descriptor to get closed.
-   
+
    wait and debugger are both used in debugging.  If wait is non-NULL,
    the runner will wait until the value pointed to by wait is non-zero
    before launching the tile.  Likewise, if debugger is non-NULL, the

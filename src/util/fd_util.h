@@ -8,10 +8,12 @@
 //#include "wksp/fd_wksp.h"         /* includes sanitize/fd_asan.h */
 //#include "cstr/fd_cstr.h"         /* includes bits/fd_bits.h */
 //#include "io/fd_io.h"             /* includes bits/fd_bits.h */
+#include "spad/fd_spad.h"           /* includes bits/fd_bits.h */
 //#include "pod/fd_pod.h"           /* includes cstr/fd_cstr.h */
 //#include "env/fd_env.h"           /* includes cstr/fd_cstr.h */
 //#include "log/fd_log.h"           /* includes env/fd_env.h io/fd_io.h */
 //#include "shmem/fd_shmem.h"       /* includes log/fd_log.h */
+#include "checkpt/fd_checkpt.h"     /* includes log/fd_log.h */
 //#include "tile/fd_tile.h"         /* includes shmem/fd_shmem.h */
 //#include "wksp/fd_wksp.h"         /* includes shmem/fd_shmem.h pod/fd_pod.h */
 //#include "valloc/fd_valloc.h"     /* includes fd_util_base.h */

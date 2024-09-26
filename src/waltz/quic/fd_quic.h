@@ -1,8 +1,8 @@
 #ifndef HEADER_fd_src_waltz_quic_fd_quic_h
 #define HEADER_fd_src_waltz_quic_fd_quic_h
 
-/* fd_quic_t is an implementation of QUIC -- an encrypted, multiplexing
-   transport layer network protocol.
+/* fd_quic_t is a partial implementation of QUIC -- an encrypted,
+   multiplexing transport layer network protocol.
 
    For now, IPv4 over Ethernet (EN10MB) flows are supported.
 
@@ -161,8 +161,7 @@ struct __attribute__((aligned(16UL))) fd_quic_config {
 
   /* TLS config ********************************************/
 
-  /* identity_key: Ed25519 public key of node identity
-     (Can be random bytes) */
+  /* identity_key: Ed25519 public key of node identity */
   uchar identity_public_key[ 32 ];
 
   /* Callback for signing TLS 1.3 certificate verify payload */
@@ -239,12 +238,10 @@ typedef void
 /* fd_quic_cb_stream_new_t is called when the peer creates a new stream.
    Callback should set "context" within the supplied stream object but
    may not change any other stream fields. quic_ctx is the user-provided
-   QUIC context.  Note that this differs from the stream context.
-   stream_type is one of FD_QUIC_TYPE_{UNI,BI}DIR. */
+   QUIC context.  Note that this differs from the stream context. */
 typedef void
 (* fd_quic_cb_stream_new_t)( fd_quic_stream_t * stream,
-                             void *             quic_ctx,
-                             int                stream_type );
+                             void *             quic_ctx );
 
 /* fd_quic_cb_stream_notify_t signals a notable stream event.
    stream_ctx object is the user-provided stream context set in the new

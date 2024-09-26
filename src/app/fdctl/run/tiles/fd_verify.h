@@ -1,7 +1,7 @@
 #ifndef HEADER_fd_src_app_fdctl_run_tiles_verify_h
 #define HEADER_fd_src_app_fdctl_run_tiles_verify_h
 
-#include "tiles.h"
+#include "../../../../disco/tiles.h"
 
 #define VERIFY_TCACHE_DEPTH   16UL
 #define VERIFY_TCACHE_MAP_CNT 64UL
@@ -38,6 +38,8 @@ typedef struct {
   ulong       out_chunk0;
   ulong       out_wmark;
   ulong       out_chunk;
+
+  ulong       hashmap_seed;
 } fd_verify_ctx_t;
 
 static inline int
@@ -61,8 +63,7 @@ fd_txn_verify( fd_verify_ctx_t * ctx,
   /* The first signature is the transaction id, i.e. a unique identifier.
      So use this to do a quick dedup of ha traffic. */
 
-  /* TODO: use more than 64 bits to dedup. */
-  ulong ha_dedup_tag = *((ulong *)signatures);
+  ulong ha_dedup_tag = fd_hash( ctx->hashmap_seed, signatures, 64UL );
   int ha_dup;
   FD_FN_UNUSED ulong tcache_map_idx = 0; /* ignored */
   FD_TCACHE_QUERY( ha_dup, tcache_map_idx, ctx->tcache_map, ctx->tcache_map_cnt, ha_dedup_tag );

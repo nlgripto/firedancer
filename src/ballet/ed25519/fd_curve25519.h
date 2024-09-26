@@ -15,6 +15,9 @@
 #include "ref/fd_curve25519.h"
 #endif
 
+/* Max batch size for MSM. */
+#define FD_BALLET_CURVE25519_MSM_BATCH_SZ 32
+
 /* curve constants. these are imported from table/fd_curve25519_table_{arch}.c.
    they are (re)defined here to avoid breaking compilation when the table needs
    to be rebuilt. */
@@ -141,7 +144,7 @@ fd_ed25519_scalar_mul( fd_ed25519_point_t *       r,
 /* fd_ed25519_scalar_mul_base_const_time computes r = n * P, and returns r.
    n is a scalar. P is the base point.
    Note: const time implementation, safe to use with n secret. */
-fd_ed25519_point_t *
+fd_ed25519_point_t * FD_FN_SENSITIVE
 fd_ed25519_scalar_mul_base_const_time( fd_ed25519_point_t * r,
                                        uchar const          n[ 32 ] ); /* can be a secret */
 

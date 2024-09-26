@@ -2,7 +2,7 @@
 #define HEADER_fd_src_flamenco_runtime_program_fd_system_program_h
 
 #include "../../fd_flamenco_base.h"
-#include "../fd_executor.h"
+#include "../../types/fd_types.h"
 
 /* Custom error types */
 
@@ -20,7 +20,7 @@ FD_PROTOTYPES_BEGIN
 
 /* fd_system_program_execute is the entrypoint for the system program */
 
-int fd_system_program_execute( fd_exec_instr_ctx_t ctx ) ;
+int fd_system_program_execute( fd_exec_instr_ctx_t * ctx ) ;
 
 /* System program instruction handlers */
 
@@ -52,12 +52,14 @@ fd_load_nonce_account( fd_exec_txn_ctx_t const *   txn_ctx,
                        fd_nonce_state_versions_t * state,
                        fd_valloc_t                 valloc,
                        int *                       perr );
-
-/* returns 1 if a nonce account is present in a transaction, zero otherwise*/
+                       
+/* fd_check_transaction_age returns 1 if the transactions age is 
+   valid, returns 0 otherwise. This is determined by the age of
+   the blockhash provided in the transaction message or by the
+   validity of the nonce provided in the transaction. */
 
 int
-fd_has_nonce_account( fd_exec_txn_ctx_t const *   txn_ctx,
-                      int *                       perr );
+fd_check_transaction_age( fd_exec_txn_ctx_t const * txn_ctx );
 
 FD_PROTOTYPES_END
 

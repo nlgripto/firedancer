@@ -1,8 +1,9 @@
 #include "fd_instr_info.h"
 
 #include "../fd_account.h"
+#include "../../../util/bits/fd_uwide.h"
 
-/* demote_program_id() in https://github.com/solana-labs/solana/blob/061bed0a8ca80afb97f4438155e8a6b47bbf7f6d/sdk/program/src/message/versions/v0/loaded.rs#L150 */
+/* https://github.com/anza-xyz/agave/blob/1ca8cb866a8a1bcb33cea23613649b82d48ed62c/sdk/program/src/message/versions/v0/loaded.rs#L162 */
 int
 fd_txn_account_is_demotion( fd_exec_txn_ctx_t * txn_ctx, int idx )
 {
@@ -35,12 +36,15 @@ fd_convert_txn_instr_to_instr( fd_exec_txn_ctx_t *     txn_ctx,
   fd_rawtxn_b_t const * txn_raw = txn_ctx->_txn_raw;
   const fd_pubkey_t *   accounts = txn_ctx->accounts;
 
-  ulong starting_lamports = 0;
-  instr->program_id = txn_instr->program_id;
+  /* TODO: Lamport check may be redundant */
+  ulong starting_lamports_h = 0;
+  ulong starting_lamports_l = 0;
+
+  instr->program_id        = txn_instr->program_id;
   instr->program_id_pubkey = accounts[txn_instr->program_id];
-  instr->acct_cnt = txn_instr->acct_cnt;
-  instr->data_sz = txn_instr->data_sz;
-  instr->data =  (uchar *)txn_raw->raw + txn_instr->data_off;
+  instr->acct_cnt          = txn_instr->acct_cnt;
+  instr->data_sz           = txn_instr->data_sz;
+  instr->data              = (uchar *)txn_raw->raw + txn_instr->data_off;
 
   uchar acc_idx_seen[256];
   memset(acc_idx_seen, 0, 256);
@@ -57,18 +61,18 @@ fd_convert_txn_instr_to_instr( fd_exec_txn_ctx_t *     txn_ctx,
     instr->is_duplicate[i] = acc_idx_seen[acc_idx];
     if( FD_LIKELY( !acc_idx_seen[acc_idx] ) ) {
       /* This is the first time seeing this account */
-      acc_idx_seen[acc_idx] = 1;
       if( instr->borrowed_accounts[i] != NULL && instr->borrowed_accounts[i]->const_meta != NULL ) {
-        starting_lamports += instr->borrowed_accounts[i]->const_meta->info.lamports;
+        fd_uwide_inc( &starting_lamports_h, &starting_lamports_l, 
+                      starting_lamports_h, starting_lamports_l,
+                      instr->borrowed_accounts[i]->const_meta->info.lamports );
       }
+      acc_idx_seen[acc_idx] = 1;
     }
 
     instr->acct_txn_idxs[i] = acc_idx;
     instr->acct_pubkeys[i] = accounts[instr_acc_idxs[i]];
     instr->acct_flags[i] = 0;
-
-    if( fd_account_is_writable_idx( txn_descriptor, accounts, txn_instr->program_id, instr_acc_idxs[i] ) &&
-        !fd_txn_account_is_demotion( txn_ctx, instr_acc_idxs[i] ) ) {
+    if( fd_txn_account_is_writable_idx( txn_ctx, (int)instr_acc_idxs[i]) ) {
         instr->acct_flags[i] |= FD_INSTR_ACCT_FLAGS_IS_WRITABLE;
     }
     if( fd_txn_is_signer( txn_descriptor, instr_acc_idxs[i] ) ) {
@@ -76,10 +80,12 @@ fd_convert_txn_instr_to_instr( fd_exec_txn_ctx_t *     txn_ctx,
     }
   }
 
-  instr->starting_lamports = starting_lamports;
+  instr->starting_lamports_h = starting_lamports_h;
+  instr->starting_lamports_l = starting_lamports_l;
+
 }
 
-FD_FN_PURE int
+int
 fd_instr_any_signed( fd_instr_info_t const * info,
                      fd_pubkey_t const *     pubkey ) {
   int is_signer = 0;
@@ -90,16 +96,34 @@ fd_instr_any_signed( fd_instr_info_t const * info,
   return is_signer;
 }
 
-ulong
-fd_instr_info_sum_account_lamports( fd_instr_info_t const * instr ) {
-  ulong total_lamports = 0;
-  for( ulong i = 0; i < instr->acct_cnt; i++ ) {
-    if( instr->borrowed_accounts[i] != NULL && !instr->is_duplicate[i] && instr->borrowed_accounts[i]->const_meta != NULL ) {
-      // FD_LOG_WARNING(("SUM INSTR INFO LAMPS: %32J %lu", instr->acct_pubkeys[i].key, instr->borrowed_accounts[i]->const_meta->info.lamports ));
-      total_lamports += instr->borrowed_accounts[i]->const_meta->info.lamports;
+/* https://github.com/anza-xyz/agave/blob/9706a6464665f7ebd6ead47f0d12f853ccacbab9/sdk/src/transaction_context.rs#L40 */
+int
+fd_instr_info_sum_account_lamports( fd_instr_info_t const * instr, 
+                                    ulong *                 total_lamports_h, 
+                                    ulong *                 total_lamports_l ) {
+  *total_lamports_h = 0UL;
+  *total_lamports_l = 0UL;
+  for( ulong i=0UL; i<instr->acct_cnt; ++i ) {
+    if( instr->borrowed_accounts[i] == NULL || 
+        instr->is_duplicate[i]              || 
+        instr->borrowed_accounts[i]->const_meta == NULL ) {
+      continue;
     }
-  }
-  // FD_LOG_WARNING(("SUM: %lu", total_lamports));
 
-  return total_lamports;
+    /* Perform a checked add on a fd_uwide */
+    ulong tmp_total_lamports_h = 0UL;
+    ulong tmp_total_lamports_l = 0UL;
+
+    fd_uwide_inc( &tmp_total_lamports_h, &tmp_total_lamports_l, *total_lamports_h, *total_lamports_l,
+                  instr->borrowed_accounts[i]->const_meta->info.lamports );
+    
+    if( tmp_total_lamports_h < *total_lamports_h ) {
+      return FD_EXECUTOR_INSTR_ERR_ARITHMETIC_OVERFLOW;
+    }
+
+    *total_lamports_h = tmp_total_lamports_h;
+    *total_lamports_l = tmp_total_lamports_l;
+  }
+
+  return FD_EXECUTOR_INSTR_SUCCESS;
 }

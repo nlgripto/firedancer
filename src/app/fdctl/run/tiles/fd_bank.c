@@ -1,4 +1,4 @@
-#include "tiles.h"
+#include "../../../../disco/tiles.h"
 
 #include "../../../../ballet/pack/fd_pack.h"
 #include "../../../../ballet/blake3/fd_blake3.h"
@@ -17,7 +17,6 @@ typedef struct {
   uchar * txn_sidecar_mem;
 
   void const * _bank;
-  ulong * bank_busy;
 
   fd_wksp_t * pack_in_mem;
   ulong       pack_in_chunk0;
@@ -32,9 +31,9 @@ typedef struct {
     ulong slot_acquire[ 3 ];
 
     ulong txn_load_address_lookup_tables[ 6 ];
-    ulong txn_load[ 38 ];
-    ulong txn_executing[ 38 ];
-    ulong txn_executed[ 38 ];
+    ulong txn_load[ 39 ];
+    ulong txn_executing[ 39 ];
+    ulong txn_executed[ 39 ];
   } metrics;
 } fd_bank_ctx_t;
 
@@ -98,10 +97,11 @@ before_frag( void * _ctx,
 }
 
 extern void * fd_ext_bank_pre_balance_info( void const * bank, void * txns, ulong txn_cnt );
-extern void * fd_ext_bank_load_and_execute_txns( void const * bank, void * txns, ulong txn_cnt, int * out_load_results, int * out_executing_results, int * out_executed_results );
+extern void * fd_ext_bank_load_and_execute_txns( void const * bank, void * txns, ulong txn_cnt, int * out_load_results, int * out_executing_results, int * out_executed_results, uint * out_consumed_cus );
 extern void   fd_ext_bank_commit_txns( void const * bank, void const * txns, ulong txn_cnt , void * load_and_execute_output, void * pre_balance_info );
 extern void   fd_ext_bank_release_thunks( void * load_and_execute_output );
 extern void   fd_ext_bank_release_pre_balance_info( void * pre_balance_info );
+extern int    fd_ext_bank_verify_precompiles( void const * bank, void const * txn );
 
 static inline void
 during_frag( void * _ctx,
@@ -183,6 +183,12 @@ after_frag( void *             _ctx,
     ctx->metrics.txn_load_address_lookup_tables[ result ]++;
     if( FD_UNLIKELY( result!=FD_BANK_ABI_TXN_INIT_SUCCESS ) ) continue;
 
+    int precompile_result = fd_ext_bank_verify_precompiles( ctx->_bank, abi_txn );
+    if( FD_UNLIKELY( precompile_result ) ) {
+      FD_MCNT_INC( BANK_TILE, PRECOMPILE_VERIFY_FAILURE, 1 );
+      continue;
+    }
+
     txn->flags |= FD_TXN_P_FLAGS_SANITIZE_SUCCESS;
 
     fd_txn_t * txn1 = TXN(txn);
@@ -192,9 +198,10 @@ after_frag( void *             _ctx,
 
   /* Just because a transaction was executed doesn't mean it succeeded,
      but all executed transactions get committed. */
-  int load_results[ MAX_TXN_PER_MICROBLOCK ] = {0};
-  int executing_results[ MAX_TXN_PER_MICROBLOCK ] = {0};
-  int executed_results[ MAX_TXN_PER_MICROBLOCK ] = {0};
+  int  load_results     [ MAX_TXN_PER_MICROBLOCK ] = { 0  };
+  int  executing_results[ MAX_TXN_PER_MICROBLOCK ] = { 0  };
+  int  executed_results [ MAX_TXN_PER_MICROBLOCK ] = { 0  };
+  uint consumed_cus     [ MAX_TXN_PER_MICROBLOCK ] = { 0U };
 
   void * pre_balance_info = fd_ext_bank_pre_balance_info( ctx->_bank, ctx->txn_abi_mem, sanitized_txn_cnt );
 
@@ -203,11 +210,14 @@ after_frag( void *             _ctx,
                                                                       sanitized_txn_cnt,
                                                                       load_results,
                                                                       executing_results,
-                                                                      executed_results );
+                                                                      executed_results,
+                                                                      consumed_cus     );
 
   ulong sanitized_idx = 0UL;
   for( ulong i=0; i<txn_cnt; i++ ) {
     fd_txn_p_t * txn = (fd_txn_p_t *)( dst + (i*sizeof(fd_txn_p_t)) );
+
+    txn->executed_cus  = 0UL; /* Assume failure, set below if success */
     if( FD_UNLIKELY( !(txn->flags & FD_TXN_P_FLAGS_SANITIZE_SUCCESS) ) ) continue;
 
     sanitized_idx++;
@@ -218,7 +228,8 @@ after_frag( void *             _ctx,
     if( FD_UNLIKELY( executing_results[ sanitized_idx-1 ] ) ) continue;
 
     ctx->metrics.txn_executed[ executed_results[ sanitized_idx-1 ] ]++;
-    txn->flags |= FD_TXN_P_FLAGS_EXECUTE_SUCCESS;
+    txn->flags        |= FD_TXN_P_FLAGS_EXECUTE_SUCCESS;
+    txn->executed_cus  = consumed_cus[ sanitized_idx-1UL ];
   }
 
   /* Commit must succeed so no failure path.  This function takes
@@ -231,16 +242,13 @@ after_frag( void *             _ctx,
   pre_balance_info        = NULL;
   load_and_execute_output = NULL;
 
-  /* Indicate to pack tile we are done processing the transactions so it
-     can pack new microblocks using these accounts.  DO NOT USE THE
-     SANITIZED TRANSACTIONS AFTER THIS POINT, THEY ARE NOT LONGER VALID. */
-  fd_fseq_update( ctx->bank_busy, seq );
-
   /* Now produce the merkle hash of the transactions for inclusion
      (mixin) to the PoH hash.  This is done on the bank tile because
      it shards / scales horizontally here, while PoH does not. */
   fd_microblock_trailer_t * trailer = (fd_microblock_trailer_t *)( dst + txn_cnt*sizeof(fd_txn_p_t) );
   hash_transactions( ctx->bmtree, (fd_txn_p_t*)dst, txn_cnt, trailer->hash );
+  trailer->bank_idx      = ctx->kind_id;
+  trailer->bank_busy_seq = seq;
 
   /* MAX_MICROBLOCK_SZ - (MAX_TXN_PER_MICROBLOCK*sizeof(fd_txn_p_t)) == 64
      so there's always 64 extra bytes at the end to stash the hash. */
@@ -275,10 +283,6 @@ unprivileged_init( fd_topo_t *      topo,
   ctx->kind_id = tile->kind_id;
   ctx->blake3 = NONNULL( fd_blake3_join( fd_blake3_new( blake3 ) ) );
   ctx->bmtree = NONNULL( bmtree );
-  ulong busy_obj_id = fd_pod_queryf_ulong( topo->props, ULONG_MAX, "bank_busy.%lu", tile->kind_id );
-  FD_TEST( busy_obj_id!=ULONG_MAX );
-  ctx->bank_busy = fd_fseq_join( fd_topo_obj_laddr( topo, busy_obj_id ) );
-  if( FD_UNLIKELY( !ctx->bank_busy ) ) FD_LOG_ERR(( "banking tile %lu has no busy flag", tile->kind_id ));
 
   memset( &ctx->metrics, 0, sizeof( ctx->metrics ) );
 

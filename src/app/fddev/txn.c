@@ -151,7 +151,7 @@ txn_cmd_fn( args_t *         args,
                             0UL }, // FD_QUIC_STREAM_TYPE_UNI_SERVER
     .stream_sparsity  = 4.0,
     .inflight_pkt_cnt = 64UL,
-    .tx_buf_sz        = 1UL<<15UL,
+    .tx_buf_sz        = fd_ulong_pow2_up( FD_TXN_MTU ),
     .stream_pool_cnt  = 16
   };
   ulong quic_footprint = fd_quic_footprint( &quic_limits );
@@ -166,9 +166,6 @@ txn_cmd_fn( args_t *         args,
   void * mem = fd_wksp_alloc_laddr( wksp, fd_quic_align(), quic_footprint, 1UL );
   fd_quic_t * quic = fd_quic_join( fd_quic_new( mem, &quic_limits ) );
   FD_TEST( quic );
-
-  if( FD_UNLIKELY( 32UL!=getrandom( quic->config.identity_public_key, 32UL, 0 ) ) )
-    FD_LOG_ERR(( "failed to generate identity key: getrandom(32,0) failed" ));
 
   /* Signer */
   fd_rng_t _rng[1]; fd_rng_t * rng = fd_rng_join( fd_rng_new( _rng, 0U, 0UL ) );
@@ -189,9 +186,8 @@ txn_cmd_fn( args_t *         args,
   client_cfg->net.ip_addr           = udpsock->listen_ip;
   client_cfg->net.ephem_udp_port.lo = (ushort)udpsock->listen_port;
   client_cfg->net.ephem_udp_port.hi = (ushort)(udpsock->listen_port + 1);
-  client_cfg->initial_rx_max_stream_data = 1<<15;
   client_cfg->idle_timeout = 200UL * 1000UL * 1000UL; /* 5000 millis */
-  client_cfg->initial_rx_max_stream_data = FD_QUIC_DEFAULT_INITIAL_RX_MAX_STREAM_DATA;
+  client_cfg->initial_rx_max_stream_data = 0; /* doesn't receive */
 
   fd_aio_pkt_info_t pkt[ MAX_TXN_COUNT ];
 

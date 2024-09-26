@@ -10,8 +10,10 @@
 #define MAP_KEY_HASH(k0,seed) fd_funk_xid_key_pair_hash((k0),(seed))
 #define MAP_KEY_COPY(kd,ks)   fd_funk_xid_key_pair_copy((kd),(ks))
 #define MAP_NEXT              map_next
+#define MAP_HASH              map_hash
 #define MAP_MAGIC             (0xf173da2ce77ecdb0UL) /* Firedancer rec db version 0 */
 #define MAP_IMPL_STYLE        2
+#define MAP_MEMOIZE           1
 #include "../util/tmpl/fd_map_giant.c"
 
 FD_FN_PURE ulong
@@ -82,11 +84,20 @@ fd_funk_rec_query_safe( fd_funk_t *               funk,
                         fd_funk_rec_key_t const * key,
                         fd_valloc_t               valloc,
                         ulong *                   result_len ) {
+  return fd_funk_rec_query_xid_safe( funk, key, fd_funk_root( funk ), valloc, result_len );
+}
+
+void *
+fd_funk_rec_query_xid_safe( fd_funk_t *               funk,
+                            fd_funk_rec_key_t const * key,
+                            fd_funk_txn_xid_t const * xid,
+                            fd_valloc_t               valloc,
+                            ulong *                   result_len ) {
   fd_wksp_t * wksp = fd_funk_wksp( funk );
   fd_funk_rec_t * rec_map = fd_funk_rec_map( funk, wksp );
-  
+
   fd_funk_xid_key_pair_t pair[1];
-  fd_funk_xid_key_pair_init( pair, fd_funk_root( funk ), key );
+  fd_funk_xid_key_pair_init( pair, xid, key );
 
   for(;;) {
     ulong lock_start;
@@ -108,7 +119,7 @@ fd_funk_rec_query_safe( fd_funk_t *               funk,
       if( lock_start == funk->write_lock ) return res;
       fd_valloc_free( valloc, res );
     }
-    
+
     /* else try again */
     FD_SPIN_PAUSE();
   }
@@ -618,8 +629,12 @@ fd_funk_rec_write_prepare( fd_funk_t *               funk,
 
   /* Grow the record to the right size */
   rec->flags &= ~FD_FUNK_REC_FLAG_ERASE;
-  if ( fd_funk_val_sz( rec ) < min_val_size )
-    rec = fd_funk_val_truncate( rec, min_val_size, fd_funk_alloc( funk, wksp ), wksp, opt_err );
+  if ( fd_funk_val_sz( rec ) < min_val_size ) {
+    if( funk->speed_load )
+      rec = fd_funk_val_speed_load( funk, rec, min_val_size, wksp, opt_err );
+    else
+      rec = fd_funk_val_truncate( rec, min_val_size, fd_funk_alloc( funk, wksp ), wksp, opt_err );
+  }
 
   return rec;
 }
@@ -664,16 +679,6 @@ fd_funk_rec_verify( fd_funk_t * funk ) {
       fd_funk_txn_t const * txn = fd_funk_txn_map_query_const( txn_map, txn_xid, NULL );
       TEST( txn );
       TEST( txn==(txn_map+txn_idx) );
-
-      /* At this point, txn points to a sane value and map verify has already
-         ensured txn_map has no cycles.  So we are safe to call
-         query_global_const here.  TODO: const correct. */
-
-      if( (rec->flags & FD_FUNK_REC_FLAG_ERASE) ) {
-        fd_funk_rec_t const * erase_rec =
-          fd_funk_rec_query_global( funk, fd_funk_txn_parent( (fd_funk_txn_t *)txn, txn_map ), fd_funk_rec_key( rec ) );
-        TEST( erase_rec && !(erase_rec->flags & FD_FUNK_REC_FLAG_ERASE) );
-      }
 
     }
   }

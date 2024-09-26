@@ -27,13 +27,14 @@
    transaction.  The details are exposed here to facilitate inlining
    various operations. */
 
-struct fd_funk_txn_private {
+struct __attribute__((aligned(FD_FUNK_TXN_ALIGN))) fd_funk_txn_private {
 
   /* These fields are managed by the funk's txn_map */
 
   fd_funk_txn_xid_t xid;      /* Transaction id, at a minimum, unique among all in-prepare and the last published transaction,
                                  ideally globally unique */
   ulong             map_next; /* Internal use by map */
+  ulong             map_hash; /* Internal use by map */
 
   /* These fields are managed by the funk */
 
@@ -61,8 +62,10 @@ typedef struct fd_funk_txn_private fd_funk_txn_t;
 #define MAP_KEY_HASH(k0,seed) fd_funk_txn_xid_hash((k0),(seed))
 #define MAP_KEY_COPY(kd,ks)   fd_funk_txn_xid_copy((kd),(ks))
 #define MAP_NEXT              map_next
+#define MAP_HASH              map_hash
 #define MAP_MAGIC             (0xf173da2ce7172db0UL) /* Firedancer trn db version 0 */
 #define MAP_IMPL_STYLE        1
+#define MAP_MEMOIZE           1
 #include "../util/tmpl/fd_map_giant.c"
 
 FD_PROTOTYPES_BEGIN
@@ -76,6 +79,9 @@ static inline ulong fd_funk_txn_idx ( uint  idx ) { return (ulong)idx; }
    0 otherwise. */
 
 static inline int fd_funk_txn_idx_is_null( ulong idx ) { return idx==FD_FUNK_TXN_IDX_NULL; }
+
+/* Generate a globally unique psuedo-random xid */
+fd_funk_txn_xid_t fd_funk_generate_xid(void);
 
 /* Accessors */
 
@@ -222,10 +228,10 @@ fd_funk_txn_next_rec( fd_funk_t *           funk,
    data corruption.
 
    fd_funk_txn_descendant returns a pointer in the caller's address
-   space to the first the first transaction among txn and its youngest
-   direct descendant inclusive that currently either has no children or
-   has multiple children.  Returns NULL if txn is not an only child.
-   This is a reasonably fast O(length of descendant history) time
+   space to the first transaction among txn and its youngest direct
+   descendant inclusive that currently either has no children or has
+   multiple children.  Returns NULL if txn is not an only child.  This
+   is a reasonably fast O(length of descendant history) time
    (theoretical minimum) and a reasonably small O(1) space (theoretical
    minimum).  This is not fortified against transaction map data
    corruption.
@@ -394,7 +400,7 @@ fd_funk_txn_cancel_all( fd_funk_t *     funk,
    failed to publish, its siblings or its descendants.  Likewise, all
    the failed transaction's ancestors were reliably published.  Funk
    last publish, query, the various traversals and so forth can be used
-   to diagnosed the details about such situations.
+   to diagnose the details about such situations.
 
    Assumes funk is a current local join.  Reasons for failure include
    NULL funk, txn does not point to an in-preparation funk transaction.

@@ -13,6 +13,10 @@ if [[ -z "$MACHINES" ]]; then
   exit 1
 fi
 
+if [[ -z "$TARGETS" ]]; then
+  TARGETS="all integration-test fdctl"
+fi
+
 for extra in $EXTRAS; do
   if [[ $extra == "llvm-cov" ]]; then
     HAS_LLVM_COV=1
@@ -29,7 +33,7 @@ for MACHINE in ${MACHINES[*]}; do
   OBJDIR="$(make help | grep OBJDIR | awk '{print $4}')"
   OBJDIRS+=( "${OBJDIR}" )
   make clean --silent >/dev/null
-  contrib/make-j all integration-test
+  contrib/make-j $TARGETS
   if [[ "$NOTEST" != 1 ]]; then
     make run-unit-test
     if [[ "$EXTRAS" != *"ubsan"* && "$EXTRAS" != *"asan"* ]]; then
@@ -37,10 +41,14 @@ for MACHINE in ${MACHINES[*]}; do
     fi
     make run-fuzz-test
     make run-script-test
+    make run-test-vectors
     if [[ "$HAS_LLVM_COV" == 1 ]]; then
       make "${OBJDIR}/cov/cov.lcov"
     fi
   fi
+  for ledger in $EXTRA_RUN_TARGETS; do
+    make $ledger
+  done
   export -n MACHINE
 done
 

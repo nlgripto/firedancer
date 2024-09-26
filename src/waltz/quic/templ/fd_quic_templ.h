@@ -80,7 +80,7 @@ FD_TEMPL_DEF_STRUCT_END(version_neg)
      Packet Payload (8..),
    }
    Figure 15: Initial Packet
- 
+
    The first CRYPTO frame sent always begins at an offset of 0 */
 
 FD_TEMPL_DEF_STRUCT_BEGIN(initial)
@@ -95,8 +95,10 @@ FD_TEMPL_DEF_STRUCT_BEGIN(initial)
   FD_TEMPL_MBR_ELEM          ( src_conn_id_len,  uchar                   )
   FD_TEMPL_MBR_ELEM_VAR      ( src_conn_id,      0,160,  src_conn_id_len )
 
+  /* FIXME use a pointer here */
   FD_TEMPL_MBR_ELEM_VARINT   ( token_len,        ulong                   )
-  FD_TEMPL_MBR_ELEM_VAR      ( token,            0,616,  token_len       )
+  FD_TEMPL_MBR_ELEM_VAR      ( token,            0,2048, token_len       )
+
   FD_TEMPL_MBR_ELEM_VARINT   ( len,              ulong                   )
   FD_TEMPL_MBR_ELEM_PKTNUM   ( pkt_num,          ulong                   )
 
@@ -194,7 +196,7 @@ FD_TEMPL_DEF_STRUCT_END(handshake)
      Retry Integrity Tag (128),
    }
  Figure 18: Retry Packet */
-FD_TEMPL_DEF_STRUCT_BEGIN(retry)
+FD_TEMPL_DEF_STRUCT_BEGIN(retry_hdr)
   FD_TEMPL_MBR_ELEM_BITS     ( hdr_form,            uchar, 1               )
   FD_TEMPL_MBR_ELEM_BITS     ( fixed_bit,           uchar, 1               )
   FD_TEMPL_MBR_ELEM_BITS_TYPE( long_packet_type,    uchar, 2, 0x03         )
@@ -204,48 +206,8 @@ FD_TEMPL_DEF_STRUCT_BEGIN(retry)
   FD_TEMPL_MBR_ELEM          ( dst_conn_id_len,     uchar                  )
   FD_TEMPL_MBR_ELEM_VAR      ( dst_conn_id,         0,160, dst_conn_id_len )
   FD_TEMPL_MBR_ELEM          ( src_conn_id_len,     uchar                  )
-  FD_TEMPL_MBR_ELEM_VAR      ( src_conn_id,         0,160, src_conn_id_len )
-
-  // TODO variable-length encoding with hidden len
-  FD_TEMPL_MBR_ELEM_FIXED    ( retry_token,         uchar, 77              )
-  FD_TEMPL_MBR_ELEM_FIXED    ( retry_integrity_tag, uchar, 16              )
-FD_TEMPL_DEF_STRUCT_END(retry)
-
-
-/* 5.8 (RFC 9001) Retry Packet Integrity
-    Retry Pseudo-Packet {
-     ODCID Length (8),
-     Original Destination Connection ID (0..160),
-     Header Form (1) = 1,
-     Fixed Bit (1) = 1,
-     Long Packet Type (2) = 3,
-     Unused (4),
-     Version (32),
-     DCID Len (8),
-     Destination Connection ID (0..160),
-     SCID Len (8),
-     Source Connection ID (0..160),
-     Retry Token (..),
-   }
-   Figure 8: Retry Pseudo-Packet */
-FD_TEMPL_DEF_STRUCT_BEGIN(retry_pseudo)
-  FD_TEMPL_MBR_ELEM          ( odcid_len,           uchar                  ) 
-  FD_TEMPL_MBR_ELEM_VAR      ( odcid,               0,160, odcid_len       )
-
-  FD_TEMPL_MBR_ELEM_BITS     ( hdr_form,            uchar, 1               )
-  FD_TEMPL_MBR_ELEM_BITS     ( fixed_bit,           uchar, 1               )
-  FD_TEMPL_MBR_ELEM_BITS_TYPE( long_packet_type,    uchar, 2, 0x03         )
-  FD_TEMPL_MBR_ELEM_BITS     ( unused,              uchar, 4               )
-
-  FD_TEMPL_MBR_ELEM          ( version,             uint                   )
-  FD_TEMPL_MBR_ELEM          ( dst_conn_id_len,     uchar                  )
-  FD_TEMPL_MBR_ELEM_VAR      ( dst_conn_id,         0,160, dst_conn_id_len )
-  FD_TEMPL_MBR_ELEM          ( src_conn_id_len,     uchar                  )
-  FD_TEMPL_MBR_ELEM_VAR      ( src_conn_id,         0,160, src_conn_id_len )
-
-  // TODO variable-length encoding with hidden len
-  FD_TEMPL_MBR_ELEM_FIXED    ( retry_token,         uchar, 77              )
-FD_TEMPL_DEF_STRUCT_END(retry_pseudo)
+  FD_TEMPL_MBR_ELEM_VAR      ( src_conn_id,         8,160, src_conn_id_len )
+FD_TEMPL_DEF_STRUCT_END(retry_hdr)
 
 
 
@@ -300,3 +262,69 @@ FD_TEMPL_DEF_STRUCT_BEGIN(transport_param_entry)
   FD_TEMPL_MBR_ELEM_VARINT ( param_len, ulong             )
   FD_TEMPL_MBR_ELEM_VAR_RAW( param_val, 0,8192, param_len )
 FD_TEMPL_DEF_STRUCT_END(transport_param_entry)
+
+
+/* 19. Frame common header
+
+   COMMON Frag {
+     Type (i)
+   } */
+FD_TEMPL_DEF_STRUCT_BEGIN(common_frag)
+  FD_TEMPL_MBR_ELEM_VARINT( type, ulong )
+FD_TEMPL_DEF_STRUCT_END(common_frag)
+
+
+/* 19.3.1. ACK Ranges (part of ACK frame)
+
+   ACK Range {
+     Gap (i),
+     ACK Range Length (i),
+   }
+   Figure 26: ACK Ranges */
+
+FD_TEMPL_DEF_STRUCT_BEGIN(ack_range_frag)
+  FD_TEMPL_MBR_ELEM_VARINT( gap,    ulong )
+  FD_TEMPL_MBR_ELEM_VARINT( length, ulong )
+FD_TEMPL_DEF_STRUCT_END(ack_range_frag)
+
+
+/* 19.3.2. ECN Counts (part of ACK frame)
+
+   ECN Counts {
+     ECT0 Count (i),
+     ECT1 Count (i),
+     ECN-CE Count (i),
+   }
+   Figure 27: ECN Count Format
+   The ECN count fields are:
+
+   ECT0 Count:
+   A variable-length integer representing the total number of packets received with the
+     ECT(0) codepoint in the packet number space of the ACK frame.
+
+   ECT1 Count:
+   A variable-length integer representing the total number of packets received with the
+     ECT(1) codepoint in the packet number space of the ACK frame.
+
+   ECN-CE Count:
+   A variable-length integer representing the total number of packets received with the
+     ECN-CE codepoint in the packet number space of the ACK frame. */
+
+FD_TEMPL_DEF_STRUCT_BEGIN(ecn_counts_frag)
+  FD_TEMPL_MBR_ELEM_VARINT( ect0_count,   ulong )
+  FD_TEMPL_MBR_ELEM_VARINT( ect1_count,   ulong )
+  FD_TEMPL_MBR_ELEM_VARINT( ecn_ce_count, ulong )
+FD_TEMPL_DEF_STRUCT_END(ecn_counts_frag)
+
+
+/* 18.2. Transport Parameter Definitions > Preferred Address */
+
+FD_TEMPL_DEF_STRUCT_BEGIN(preferred_address)
+  FD_TEMPL_MBR_ELEM_FIXED( ipv4_address, uchar,  4          )
+  FD_TEMPL_MBR_ELEM      ( ipv4_port,    ushort             )
+  FD_TEMPL_MBR_ELEM_FIXED( ipv6_address, uchar, 16          )
+  FD_TEMPL_MBR_ELEM      ( ipv6_port,    ushort             )
+  FD_TEMPL_MBR_ELEM      ( conn_id_len,  uchar              )
+  FD_TEMPL_MBR_ELEM_VAR  ( conn_id,      0,160, conn_id_len )
+  FD_TEMPL_MBR_ELEM_FIXED( reset_token,  uchar, 16          )
+FD_TEMPL_DEF_STRUCT_END(preferred_address)

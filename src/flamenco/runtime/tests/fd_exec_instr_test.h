@@ -4,8 +4,13 @@
 /* fd_exec_instr_test.h provides APIs for running instruction processor
    tests. */
 
-#include "fd_exec_test.pb.h"
+#include "generated/elf.pb.h"
+#include "generated/invoke.pb.h"
+#include "generated/txn.pb.h"
+#include "generated/vm.pb.h"
 #include "../../../funk/fd_funk.h"
+#include "../../vm/fd_vm.h"
+#include "../../../ballet/murmur3/fd_murmur3.h"
 
 /* fd_exec_instr_test_runner_t provides fake fd_exec_instr_ctx_t to
    test processing of individual instructions. */
@@ -40,6 +45,30 @@ fd_exec_instr_test_runner_new( void * mem,
 void *
 fd_exec_instr_test_runner_delete( fd_exec_instr_test_runner_t * runner );
 
+/* fd_exec_test_instr_context_create takes in a test runner and InstrCtx protobuf
+   and creates an fd_exec_instr_ctx_t that can be used in runtime.
+   
+   Setting is_syscall avoids some operations/checks only relevant for 
+   program instructions.
+   
+   Should be coupled with fd_exec_test_instr_context_destroy when the instr_ctx
+   is no longer needed. */
+int
+fd_exec_test_instr_context_create( fd_exec_instr_test_runner_t *        runner,
+                                   fd_exec_instr_ctx_t *                ctx,
+                                   fd_exec_test_instr_context_t const * test_ctx,
+                                   fd_alloc_t *                         alloc,
+                                   bool                                 is_syscall );
+
+/* Frees an instr_ctx created by fd_exec_test_instr_context_create */
+void
+fd_exec_test_instr_context_destroy( fd_exec_instr_test_runner_t * runner,
+                                    fd_exec_instr_ctx_t *         ctx,
+                                    fd_wksp_t *                   wksp,
+                                    fd_alloc_t *                  alloc );
+
+
+
 /* User API */
 
 /* fd_exec_instr_fixture_run executes the given instruction processing
@@ -65,11 +94,45 @@ fd_exec_instr_fixture_run( fd_exec_instr_test_runner_t *        runner,
    for failure.  Reasons for failure include insufficient output_bufsz. */
 
 ulong
-fd_exec_instr_test_run( fd_exec_instr_test_runner_t *        runner,
-                        fd_exec_test_instr_context_t const * input,
-                        fd_exec_test_instr_effects_t **      output,
-                        void *                               output_buf,
-                        ulong                                output_bufsz );
+fd_exec_instr_test_run( fd_exec_instr_test_runner_t * runner,
+                        void const *                  input_,
+                        void **                       output_,
+                        void *                        output_buf,
+                        ulong                         output_bufsz );
+
+/*
+   Similar to above, but executes a txn given txn context (input)
+*/
+ulong
+fd_exec_txn_test_run( fd_exec_instr_test_runner_t * runner, // Runner only contains funk instance, so we can borrow instr test runner
+                      void const *                  input_,
+                      void **                       output_,
+                      void *                        output_buf,
+                      ulong                         output_bufsz );
+
+/* Loads an ELF binary (in input->elf.data()). 
+   output_buf points to a memory region of output_bufsz bytes where the
+   result is allocated into. During execution, the contents of
+   fd_sbpf_program_t are wrapped in *output (backed by output_buf).
+
+   Returns number of bytes allocated at output_buf OR 0UL on any 
+   harness-specific failures. Execution failures still return number of allocated bytes,
+   but output is incomplete/undefined.
+   */
+ulong
+fd_sbpf_program_load_test_run( fd_exec_instr_test_runner_t * runner,
+                               void const *                  input_,
+                               void **                       output_,
+                               void *                        output_buf,
+                               ulong                         output_bufsz );
+
+ulong
+fd_exec_vm_syscall_test_run( fd_exec_instr_test_runner_t * runner,
+                             void const *                  input_,
+                             void **                       output_,
+                             void *                        output_buf,
+                             ulong                         output_bufsz );
+
 
 FD_PROTOTYPES_END
 

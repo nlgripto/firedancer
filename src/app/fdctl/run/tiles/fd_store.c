@@ -1,4 +1,4 @@
-#include "tiles.h"
+#include "../../../../disco/tiles.h"
 
 typedef struct {
   fd_wksp_t * mem;
@@ -8,6 +8,8 @@ typedef struct {
 
 typedef struct {
   uchar __attribute__((aligned(32UL))) mem[ FD_SHRED_STORE_MTU ];
+
+  int disable_blockstore;
 
   fd_store_in_ctx_t in[ 32 ];
 } fd_store_ctx_t;
@@ -73,7 +75,8 @@ fd_ext_blockstore_insert_shreds( void const *  blockstore,
                                  ulong         shred_cnt,
                                  uchar const * shred_bytes,
                                  ulong         shred_sz,
-                                 ulong         stride );
+                                 ulong         stride,
+                                 int           is_trusted );
 
 static inline void
 after_frag( void *             _ctx,
@@ -87,7 +90,6 @@ after_frag( void *             _ctx,
             fd_mux_context_t * mux ) {
   (void)in_idx;
   (void)seq;
-  (void)opt_sig;
   (void)opt_chunk;
   (void)opt_tsorig;
   (void)opt_filter;
@@ -104,8 +106,10 @@ after_frag( void *             _ctx,
     FD_TEST( shred34->stride==sizeof(shred34->pkts[0]) );
   }
 
+  if( FD_UNLIKELY( ctx->disable_blockstore ) ) return;
+
   /* No error code because this cannot fail. */
-  fd_ext_blockstore_insert_shreds( fd_ext_blockstore, shred34->shred_cnt, ctx->mem+shred34->offset, shred34->shred_sz, shred34->stride );
+  fd_ext_blockstore_insert_shreds( fd_ext_blockstore, shred34->shred_cnt, ctx->mem+shred34->offset, shred34->shred_sz, shred34->stride, !!*opt_sig );
 
   FD_MCNT_INC( STORE_TILE, TRANSACTIONS_INSERTED, shred34->est_txn_cnt );
 }
@@ -117,21 +121,23 @@ unprivileged_init( fd_topo_t *      topo,
   FD_SCRATCH_ALLOC_INIT( l, scratch );
   fd_store_ctx_t * ctx = FD_SCRATCH_ALLOC_APPEND( l, alignof( fd_store_ctx_t ), sizeof( fd_store_ctx_t ) );
 
-  FD_LOG_NOTICE(( "Waiting to acquire blockstore..." ));
+  FD_LOG_INFO(( "Waiting to acquire blockstore..." ));
   for(;;) {
     if( FD_LIKELY( FD_VOLATILE_CONST( fd_ext_blockstore ) ) ) break;
     FD_SPIN_PAUSE();
   }
   FD_COMPILER_MFENCE();
-  FD_LOG_NOTICE(( "Got blockstore" ));
+  FD_LOG_INFO(( "Got blockstore" ));
+
+  ctx->disable_blockstore = tile->store.disable_blockstore;
 
   for( ulong i=0; i<tile->in_cnt; i++ ) {
     fd_topo_link_t * link = &topo->links[ tile->in_link_id[ i ] ];
     fd_topo_wksp_t * link_wksp = &topo->workspaces[ topo->objs[ link->dcache_obj_id ].wksp_id ];
 
-    ctx->in[i].mem    = link_wksp->wksp;
-    ctx->in[i].chunk0 = fd_dcache_compact_chunk0( ctx->in[i].mem, link->dcache );
-    ctx->in[i].wmark  = fd_dcache_compact_wmark ( ctx->in[i].mem, link->dcache, link->mtu );
+    ctx->in[ i ].mem    = link_wksp->wksp;
+    ctx->in[ i ].chunk0 = fd_dcache_compact_chunk0( ctx->in[ i ].mem, link->dcache );
+    ctx->in[ i ].wmark  = fd_dcache_compact_wmark ( ctx->in[ i ].mem, link->dcache, link->mtu );
   }
 
   ulong scratch_top = FD_SCRATCH_ALLOC_FINI( l, 1UL );

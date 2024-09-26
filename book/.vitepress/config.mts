@@ -10,7 +10,7 @@ export default defineConfig({
   lastUpdated: true,
 
   head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/fire.svg' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/firedancer/fire.svg' }],
     ['meta', { name: 'theme-color', content: '#1ce7c2' }],
     ['meta', { name: 'og:type', content: 'website' }],
     ['meta', { name: 'og:locale', content: 'en' }],
@@ -22,7 +22,7 @@ export default defineConfig({
 
     nav: [
       { text: 'Guide', link: '/guide/firedancer' },
-      { text: 'Commands', link: '/commands' }
+      { text: 'API', link: '/api/cli' }
     ],
 
     sidebar: {
@@ -35,6 +35,32 @@ export default defineConfig({
             { text: 'Getting Started', link: 'getting-started' },
             { text: 'Configuring', link: 'configuring' },
             { text: 'Initializing', link: 'initializing' },
+          ]
+        },
+        {
+          text: 'Performance',
+          collapsed: false,
+          items: [
+            { text: 'Tuning', link: 'tuning' },
+          ]
+        },
+        {
+          text: 'Operating',
+          collapsed: false,
+          items: [
+            { text: 'Monitoring', link: 'monitoring' },
+            { text: 'Troubleshooting', link: 'troubleshooting' },
+            { text: 'Frequently Asked Questions', link: 'faq' },
+          ]
+        }
+      ] },
+
+      '/api': { base: '/api/', items: [
+        {
+          text: 'API',
+          items: [
+            { text: 'Commands Line Interface', link: 'cli' },
+            { text: 'Metrics', link: 'metrics' },
           ]
         }
       ] },

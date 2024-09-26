@@ -6,23 +6,10 @@
 #include "../../../util/rng/fd_rng.h"
 #include "../../../util/wksp/fd_wksp.h"
 
-#include "../../rewards/fd_rewards_types.h"
 #include "../sysvar/fd_sysvar_cache.h"
 #include "../sysvar/fd_sysvar_cache_old.h"
 #include "../../types/fd_types.h"
-
-/* fd_latest_vote_t records the latest voted slot hash by a given node. */
-
-struct fd_latest_vote {
-   fd_pubkey_t node_pubkey;
-   fd_slot_hash_t slot_hash;
-};
-typedef struct fd_latest_vote fd_latest_vote_t;
-
-#define DEQUE_NAME fd_latest_vote_deque
-#define DEQUE_T    fd_latest_vote_t
-#define DEQUE_MAX  (1UL << 16)
-#include "../../../util/tmpl/fd_deque.c"
+#include "../fd_txncache.h"
 
 struct fd_account_compute_elem {
   fd_pubkey_t key;
@@ -38,7 +25,7 @@ fd_pubkey_eq( fd_pubkey_t const * key1, fd_pubkey_t const * key2 ) {
 
 static ulong
 fd_pubkey_hash( fd_pubkey_t const * key, ulong seed ) {
-  return fd_hash( seed, key->key, sizeof(fd_pubkey_t) ); 
+  return fd_hash( seed, key->key, sizeof(fd_pubkey_t) );
 }
 
 static void
@@ -61,15 +48,18 @@ fd_pubkey_copy( fd_pubkey_t * keyd, fd_pubkey_t const * keys ) {
 struct __attribute__((aligned(8UL))) fd_exec_slot_ctx {
   ulong                    magic; /* ==FD_EXEC_SLOT_CTX_MAGIC */
 
-  fd_exec_epoch_ctx_t *    epoch_ctx;
-
   fd_funk_txn_t *          funk_txn;
+
+  /* External joins, pointers to be set by caller */
+
   fd_acc_mgr_t *           acc_mgr;
   fd_blockstore_t *        blockstore;
+  fd_exec_epoch_ctx_t *    epoch_ctx;
   fd_valloc_t              valloc;
 
   fd_slot_bank_t           slot_bank;
   fd_sysvar_cache_old_t    sysvar_cache_old; // TODO make const
+  // TODO this leader pointer could become invalid if forks cross epoch boundaries
   fd_pubkey_t const *      leader; /* Current leader */
   ulong                    total_compute_units_requested;
 
@@ -80,15 +70,19 @@ struct __attribute__((aligned(8UL))) fd_exec_slot_ctx {
   ulong                    signature_cnt;
   fd_hash_t                account_delta_hash;
   fd_hash_t                prev_banks_hash;
+  ulong                    prev_lamports_per_signature;
+  ulong                    parent_signature_cnt;
 
-  fd_latest_vote_t *       latest_votes;
   fd_sysvar_cache_t *      sysvar_cache;
   fd_account_compute_elem_t * account_compute_table;
+
+  fd_txncache_t * status_cache;
+  fd_slot_history_t slot_history[1];
 };
 
 #define FD_EXEC_SLOT_CTX_ALIGN     (alignof(fd_exec_slot_ctx_t))
 #define FD_EXEC_SLOT_CTX_FOOTPRINT (sizeof (fd_exec_slot_ctx_t))
-#define FD_EXEC_SLOT_CTX_MAGIC (0xC2287BA2A5E6FC3DUL) /* random */
+#define FD_EXEC_SLOT_CTX_MAGIC     (0xC2287BA2A5E6FC3DUL) /* random */
 
 /* FD_FEATURE_ACTIVE evalutes to 1 if the given feature is active, 0
    otherwise.  First arg is the fd_exec_slot_ctx_t.  Second arg is the
@@ -124,6 +118,17 @@ fd_exec_slot_ctx_delete( void * mem );
 fd_exec_slot_ctx_t *
 fd_exec_slot_ctx_recover( fd_exec_slot_ctx_t *   ctx,
                           fd_solana_manifest_t * manifest );
+
+/* fd_exec_slot_ctx_recover re-initializes the current slot
+   context's status cache from the provided solana slot deltas.
+   Assumes objects in slot deltas were allocated using slot ctx valloc
+   (U.B. otherwise).
+   On return, slot deltas is destroyed.  Returns ctx on success.
+   On failure, logs reason for error and returns NULL. */
+
+fd_exec_slot_ctx_t *
+fd_exec_slot_ctx_recover_status_cache( fd_exec_slot_ctx_t *   ctx,
+                                       fd_bank_slot_deltas_t * slot_deltas );
 
 
 /* Free all allocated memory within a slot ctx */

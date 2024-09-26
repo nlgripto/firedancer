@@ -1,8 +1,11 @@
 #include "fd_sysvar_stake_history.h"
-#include "../../types/fd_types.h"
 #include "fd_sysvar.h"
 #include "../fd_system_ids.h"
 #include "../context/fd_exec_slot_ctx.h"
+
+/* Ensure that the size declared by our header matches the minimum size
+   of the corresponding fd_types entry. */
+FD_STATIC_ASSERT( FD_SYSVAR_STAKE_HISTORY_CAP == FD_STAKE_HISTORY_MIN, types );
 
 void
 write_stake_history( fd_exec_slot_ctx_t * slot_ctx,
@@ -16,7 +19,7 @@ write_stake_history( fd_exec_slot_ctx_t * slot_ctx,
   if( FD_UNLIKELY( fd_stake_history_encode( stake_history, &encode )!=FD_BINCODE_SUCCESS ) )
     FD_LOG_ERR(("fd_stake_history_encode failed"));
 
-  fd_sysvar_set( slot_ctx, fd_sysvar_owner_id.key, &fd_sysvar_stake_history_id, enc, sizeof(enc), slot_ctx->slot_bank.slot, 0UL );
+  fd_sysvar_set( slot_ctx, fd_sysvar_owner_id.key, &fd_sysvar_stake_history_id, enc, sizeof(enc), slot_ctx->slot_bank.slot );
 }
 
 fd_stake_history_t *
@@ -43,8 +46,8 @@ fd_sysvar_stake_history_read( fd_stake_history_t * result,
 void
 fd_sysvar_stake_history_init( fd_exec_slot_ctx_t * slot_ctx ) {
   fd_stake_history_t stake_history = {
-    .pool = fd_stake_history_pool_alloc( slot_ctx->valloc ),
-    .treap = fd_stake_history_treap_alloc( slot_ctx->valloc )
+    .pool  = fd_stake_history_pool_alloc ( slot_ctx->valloc, FD_SYSVAR_STAKE_HISTORY_CAP ),
+    .treap = fd_stake_history_treap_alloc( slot_ctx->valloc, FD_SYSVAR_STAKE_HISTORY_CAP )
   };
   write_stake_history( slot_ctx, &stake_history );
 }
@@ -61,6 +64,10 @@ fd_sysvar_stake_history_update( fd_exec_slot_ctx_t *       slot_ctx,
     fd_stake_history_entry_t * ele = fd_stake_history_treap_fwd_iter_ele( iter, stake_history.pool );
     stake_history.treap = fd_stake_history_treap_ele_remove( stake_history.treap, ele, stake_history.pool );
     fd_stake_history_pool_ele_release( stake_history.pool, ele );
+  }
+
+  if( 0 == fd_stake_history_pool_free( stake_history.pool ) ) {
+    FD_LOG_ERR(( "stake_history.pool is empty" ));
   }
 
   ulong idx = fd_stake_history_pool_idx_acquire( stake_history.pool );

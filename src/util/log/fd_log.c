@@ -32,12 +32,18 @@
 #include <signal.h>
 #include <sched.h>
 #include <time.h>
+#if defined(__linux__)
 #include <syscall.h>
+#endif
 #include <sys/mman.h>
 
 #if FD_HAS_BACKTRACE
 #include <execinfo.h>
 #endif
+
+#if defined(__FreeBSD__)
+#include <sys/stat.h> /* S_IRUSR */
+#endif /* defined(__FreeBSD__) */
 
 #include "../tile/fd_tile_private.h"
 
@@ -261,7 +267,11 @@ fd_log_private_group_set( char const * group ) {
 
 ulong
 fd_log_private_tid_default( void ) {
+# if defined(__linux__)
   long tid = syscall( SYS_gettid );
+# else
+  long tid = getpid();
+# endif
   return fd_ulong_if( tid>0L, (ulong)tid, ULONG_MAX );
 }
 
@@ -397,7 +407,11 @@ fd_log_wallclock_cstr( long   now,
     hh   = (uint)tm->tm_hour;
     mm   = (uint)tm->tm_min;
     ns   = ((ulong)((uint)tm->tm_sec))*((ulong)ns_per_s) + ((ulong)_ns);
+#   if defined(__linux__)
     tz   = (int)(-timezone/3600L+(long)tm->tm_isdst);
+#   else
+    tz   = 0;
+#   endif
 
     now_ref  = now - (long)ns;
     YYYY_ref = YYYY;
@@ -506,7 +520,7 @@ int fd_log_private_logfile_fd( void ) { return FD_VOLATILE_CONST( fd_log_private
 /* Buffer size used for vsnprintf calls (this is also one more than the
    maximum size that this can passed to fd_io_write) */
 
-#define FD_LOG_BUF_SZ (4UL*4096UL)
+#define FD_LOG_BUF_SZ (16UL*4096UL)
 
 /* Lock to used by fd_log_private_fprintf_0 to sequence calls writes
    between different _processes_ that share the same fd. */
@@ -862,7 +876,7 @@ fd_log_private_2( int          level,
                   char const * msg ) {
   fd_log_private_1( level, now, file, line, func, msg );
 
-# if FD_LOG_UNCLEAN_EXIT
+# if FD_LOG_UNCLEAN_EXIT && defined(__linux__)
   if( level<fd_log_level_core() ) syscall(SYS_exit_group, 1);
 # else
   if( level<fd_log_level_core() ) exit(1); /* atexit will call fd_log_private_cleanup implicitly */
@@ -877,7 +891,11 @@ fd_log_private_raw_2( char const * file,
                       char const * func,
                       char const * msg ) {
   fd_log_private_fprintf_nolock_0( STDERR_FILENO, "%s(%i)[%s]: %s\n", file, line, func, msg );
+# if defined(__linux__)
   syscall( SYS_exit_group, 1 );
+# else
+  exit(1);
+# endif
   abort();
 }
 
@@ -1089,7 +1107,11 @@ fd_log_private_boot( int  *   pargc,
   fd_log_private_group_id_set( fd_ulong_if( pid>(pid_t)0, (ulong)pid, ULONG_MAX ) );
 
   char const * group = fd_env_strip_cmdline_cstr( pargc, pargv, "--log-group", "FD_LOG_GROUP", NULL );
+# if defined(__linux__)
   if( !group ) group = program_invocation_short_name;
+# elif defined(__FreeBSD__)
+  if( !group ) group = getprogname();
+# endif
   if( !group ) group = (pargc && pargv && (*pargc)>0) ? (*pargv)[0] : NULL;
   fd_log_private_group_set( group );
 
@@ -1199,7 +1221,6 @@ fd_log_private_boot( int  *   pargc,
   FD_LOG_INFO(( "fd_log: --log-path          %s",  fd_log_private_path    ));
   FD_LOG_INFO(( "fd_log: --log-dedup         %i",  fd_log_private_dedup   ));
   FD_LOG_INFO(( "fd_log: --log-colorize      %i",  fd_log_colorize()      ));
-  FD_LOG_INFO(( "fd_log: --log-level-logfile %i",  fd_log_level_logfile() ));
   FD_LOG_INFO(( "fd_log: --log-level-logfile %i",  fd_log_level_logfile() ));
   FD_LOG_INFO(( "fd_log: --log-level-stderr  %i",  fd_log_level_stderr()  ));
   FD_LOG_INFO(( "fd_log: --log-level-flush   %i",  fd_log_level_flush()   ));
@@ -1468,7 +1489,7 @@ fd_log_private_stack_discover( ulong   stack_sz,
   char * p = filebuf;
   int found = 0;
   while( !found ) {
-    
+
     /* Scan a line */
 
     int full_line = 0;
@@ -1533,7 +1554,7 @@ fd_log_private_stack_discover( ulong   stack_sz,
     FD_LOG_WARNING(( "unable to find stack size around address 0x%lx", stack_addr ));
 
   close(filefd);
-  
+
   *_stack0 = stack0;
   *_stack1 = stack1;
 }

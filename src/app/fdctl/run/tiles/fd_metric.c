@@ -1,9 +1,10 @@
-#include "tiles.h"
+#include "../../../../disco/tiles.h"
 
 #include "generated/metric_seccomp.h"
 
 #include "../../../../ballet/http/picohttpparser.h"
 
+#include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -61,6 +62,7 @@ close_conn( fd_metric_ctx_t * ctx,
             ulong             idx ) {
   if( FD_UNLIKELY( -1==close( ctx->fds[ idx ].fd ) ) ) FD_LOG_ERR(( "close failed (%i-%s)", errno, strerror( errno ) ));
   ctx->fds[ idx ].fd = -1;
+  ctx->conns[ idx ].bytes_read = 0UL;
 }
 
 static void
@@ -252,6 +254,9 @@ prometheus_print( fd_topo_t * topo,
   result = prometheus_print1( topo, out, out_len, "quic", FD_METRICS_QUIC_TOTAL, FD_METRICS_QUIC, PRINT_TILE );
   if( FD_UNLIKELY( result<0 ) ) return result;
   PRINT( "\n" );
+  result = prometheus_print1( topo, out, out_len, "dedup", FD_METRICS_DEDUP_TOTAL, FD_METRICS_DEDUP, PRINT_TILE );
+  if( FD_UNLIKELY( result<0 ) ) return result;
+  PRINT( "\n" );
   result = prometheus_print1( topo, out, out_len, "pack", FD_METRICS_PACK_TOTAL, FD_METRICS_PACK, PRINT_TILE );
   if( FD_UNLIKELY( result<0 ) ) return result;
   PRINT( "\n" );
@@ -266,6 +271,14 @@ prometheus_print( fd_topo_t * topo,
   PRINT( "\n" );
   result = prometheus_print1( topo, out, out_len, "store", FD_METRICS_STORE_TOTAL, FD_METRICS_STORE, PRINT_TILE );
   if( FD_UNLIKELY( result<0 ) ) return result;
+  #ifdef FD_HAS_NO_AGAVE
+  PRINT( "\n" );
+  result = prometheus_print1( topo, out, out_len, "replay", FD_METRICS_REPLAY_TOTAL, FD_METRICS_REPLAY, PRINT_TILE );
+  if( FD_UNLIKELY( result<0 ) ) return result;
+  PRINT( "\n" );
+  result = prometheus_print1( topo, out, out_len, "storei", FD_METRICS_STOREI_TOTAL, FD_METRICS_STOREI, PRINT_TILE );
+  if( FD_UNLIKELY( result<0 ) ) return result;
+#endif
 
   /* Now backfill Content-Length */
   ulong printed;
@@ -296,7 +309,10 @@ static void
 read_conn( fd_metric_ctx_t * ctx,
            ulong             idx ) {
   fd_metric_connection_t * conn = &ctx->conns[ idx ];
-  if( FD_UNLIKELY( conn->bytes_read==ULONG_MAX ) ) return; /* Connection now in write mode, no need to read more. */
+  if( FD_UNLIKELY( conn->bytes_read==ULONG_MAX ) ) {
+    close_conn( ctx, idx ); /* Client is sending data after HTTP header parsed, terminate */
+    return;
+  }
 
   long sz = read( ctx->fds[ idx ].fd, conn->input + conn->bytes_read, sizeof( conn->input ) - conn->bytes_read );
   if( FD_UNLIKELY( -1==sz && errno==EAGAIN ) ) return; /* No data to read, continue. */
@@ -490,7 +506,7 @@ fd_topo_run_tile_t fd_tile_metric = {
   .name                     = "metric",
   .mux_flags                = FD_MUX_FLAG_MANUAL_PUBLISH | FD_MUX_FLAG_COPY,
   .burst                    = 1UL,
-  .rlimit_file_cnt          = MAX_CONNS+1,
+  .rlimit_file_cnt          = MAX_CONNS+5UL, /* pipefd, socket, stderr, logfile, and one spare for new accept() connections */
   .mux_ctx                  = mux_ctx,
   .mux_before_credit        = before_credit,
   .populate_allowed_seccomp = populate_allowed_seccomp,

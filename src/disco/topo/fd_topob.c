@@ -2,15 +2,29 @@
 
 #include "fd_pod_format.h"
 
-fd_topo_t
-fd_topob_new( char const * app_name ) {
-  fd_topo_t topo[1] = {0};
+fd_topo_t *
+fd_topob_new( void * mem,
+              char const * app_name ) {
+  fd_topo_t * topo = (fd_topo_t *)mem;
+
+  if( FD_UNLIKELY( !topo ) ) {
+    FD_LOG_WARNING( ( "NULL topo" ) );
+    return NULL;
+  }
+
+  if( FD_UNLIKELY( !fd_ulong_is_aligned( (ulong)topo, alignof(fd_topo_t) ) ) ) {
+    FD_LOG_WARNING( ( "misaligned topo" ) );
+    return NULL;
+  }
+
+  fd_memset( topo, 0, sizeof(fd_topo_t) );
+
   FD_TEST( fd_pod_new( topo->props, sizeof(topo->props) ) );
 
   if( FD_UNLIKELY( strlen( app_name )>=sizeof(topo->app_name) ) ) FD_LOG_ERR(( "app_name too long: %s", app_name ));
   strncpy( topo->app_name, app_name, sizeof(topo->app_name) );
 
-  return *topo;
+  return topo;
 }
 
 void
@@ -42,6 +56,22 @@ fd_topob_obj( fd_topo_t *  topo,
   obj->id      = topo->obj_cnt;
   obj->wksp_id = wksp_id;
   topo->obj_cnt++;
+
+  return obj;
+}
+
+fd_topo_obj_t *
+fd_topob_obj_concrete( fd_topo_t *  topo,
+                       char const * obj_name,
+                       char const * wksp_name,
+                       ulong align,
+                       ulong sz,
+                       ulong loose ) {
+  fd_topo_obj_t * obj = fd_topob_obj( topo, obj_name, wksp_name );
+
+  FD_TEST( fd_pod_insertf_ulong( topo->props, align, "obj.%lu.align", obj->id ) );
+  FD_TEST( fd_pod_insertf_ulong( topo->props, sz,    "obj.%lu.sz",    obj->id ) );
+  FD_TEST( fd_pod_insertf_ulong( topo->props, loose, "obj.%lu.loose", obj->id ) );
 
   return obj;
 }
@@ -112,7 +142,7 @@ fd_topob_tile( fd_topo_t *    topo,
                char const *   cnc_wksp,
                char const *   metrics_wksp,
                ulong          cpu_idx,
-               int            is_solana_labs,
+               int            is_agave,
                char const *   out_link,
                ulong          out_link_kind_id ) {
   if( FD_UNLIKELY( !topo || !tile_name || !tile_wksp || !cnc_wksp || !metrics_wksp ) ) FD_LOG_ERR(( "NULL args" ));
@@ -128,7 +158,7 @@ fd_topob_tile( fd_topo_t *    topo,
   strncpy( tile->name, tile_name, sizeof(tile->name) );
   tile->id                  = topo->tile_cnt;
   tile->kind_id             = kind_id;
-  tile->is_labs             = is_solana_labs;
+  tile->is_agave            = is_agave;
   tile->cpu_idx             = cpu_idx;
   tile->in_cnt              = 0UL;
   tile->out_cnt             = 0UL;
@@ -268,7 +298,8 @@ validate( fd_topo_t const * topo ) {
       for( ulong k=0UL; k<topo->tiles[ i ].in_cnt; k++ ) {
         if( FD_UNLIKELY( j==k ) ) continue;
         if( FD_UNLIKELY( topo->tiles[ i ].in_link_id[ j ] == topo->tiles[ i ].in_link_id[ k ] ) )
-          FD_LOG_ERR(( "tile %lu has duplicated in link %lu", i, topo->tiles[ i ].in_link_id[ j ] ));
+          FD_LOG_ERR(( "tile %lu (%s) has duplicated in link %lu (%s)", i, topo->tiles[ i ].name, 
+              topo->tiles[ i ].in_link_id[ j ], topo->links[ topo->tiles[ i ].in_link_id[ j ] ].name ));
       }
     }
   }
@@ -279,7 +310,8 @@ validate( fd_topo_t const * topo ) {
       for( ulong k=0UL; k<topo->tiles[ i ].out_cnt; k++ ) {
         if( FD_UNLIKELY( j==k ) ) continue;
         if( FD_UNLIKELY( topo->tiles[ i ].out_link_id[ j ] == topo->tiles[ i ].out_link_id[ k ] ) )
-          FD_LOG_ERR(( "tile %lu has duplicated out link %lu", i, topo->tiles[ i ].out_link_id[ j ] ));
+          FD_LOG_ERR(( "tile %lu (%s) has duplicated out link %lu (%s)", i, topo->tiles[ i ].name, 
+              topo->tiles[ i ].out_link_id[ j ], topo->links[ topo->tiles[ i ].out_link_id[ j ] ].name ));
       }
     }
   }
@@ -299,7 +331,7 @@ validate( fd_topo_t const * topo ) {
     for( ulong j=0UL; j<topo->tiles[ i ].out_cnt; j++ ) {
       for( ulong k=0UL; k<topo->tiles[ i ].in_cnt; k++ ) {
         char const * link_name = topo->links[ topo->tiles[ i ].out_link_id[ j ] ].name;
-        /* PoH tile "publishes" this on behalf of Solana Labs, so it's not
+        /* PoH tile "publishes" this on behalf of Agave, so it's not
            a real circular link. */
         if( FD_UNLIKELY( !strcmp( link_name, "stake_out" ) ||
                          !strcmp( link_name, "crds_shred" ) ) ) continue;

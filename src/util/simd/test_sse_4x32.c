@@ -184,9 +184,13 @@ main( int     argc,
     FD_TEST( vf_test( vf_copysign( x, y ), copysignf(x0,y0), copysignf(x1,y1), copysignf(x2,y2), copysignf(x3,y3) ) );
     FD_TEST( vf_test( vf_flipsign( x, y ), y0<0.f?-x0:x0, y1<0.f?-x1:x1, y2<0.f?-x2:x2, y3<0.f?-x3:x3 ) );
 
+#   if defined(__FMA__)
     FD_TEST( vf_test( vf_fma(  x, y, z ),  x0*y0+z0,  x1*y1+z1,  x2*y2+z2,  x3*y3+z3 ) );
     FD_TEST( vf_test( vf_fms(  x, y, z ),  x0*y0-z0,  x1*y1-z1,  x2*y2-z2,  x3*y3-z3 ) );
     FD_TEST( vf_test( vf_fnma( x, y, z ), -x0*y0+z0, -x1*y1+z1, -x2*y2+z2, -x3*y3+z3 ) );
+#   else
+    (void)z;
+#   endif
 
     /* Logical operations */
 
@@ -487,6 +491,18 @@ main( int     argc,
     FD_TEST( vu_test( vu_permute( x, 2, 3, 0, 1 ), x2, x3, x0, x1 ) );
     FD_TEST( vu_test( vu_permute( x, 0, 2, 1, 3 ), x0, x2, x1, x3 ) );
     FD_TEST( vu_test( vu_permute( x, 3, 2, 1, 0 ), x3, x2, x1, x0 ) );
+
+    FD_TEST( vu_test( vu_permute2( x, y, 0, 0, 0, 0 ), x0, x0, y0, y0 ) );
+    FD_TEST( vu_test( vu_permute2( x, y, 1, 1, 1, 1 ), x1, x1, y1, y1 ) );
+    FD_TEST( vu_test( vu_permute2( x, y, 2, 2, 2, 2 ), x2, x2, y2, y2 ) );
+    FD_TEST( vu_test( vu_permute2( x, y, 3, 3, 3, 3 ), x3, x3, y3, y3 ) );
+    FD_TEST( vu_test( vu_permute2( x, y, 0, 1, 2, 3 ), x0, x1, y2, y3 ) );
+    FD_TEST( vu_test( vu_permute2( x, y, 0, 0, 2, 2 ), x0, x0, y2, y2 ) );
+    FD_TEST( vu_test( vu_permute2( x, y, 1, 1, 3, 3 ), x1, x1, y3, y3 ) );
+    FD_TEST( vu_test( vu_permute2( x, y, 1, 0, 3, 2 ), x1, x0, y3, y2 ) );
+    FD_TEST( vu_test( vu_permute2( x, y, 2, 3, 0, 1 ), x2, x3, y0, y1 ) );
+    FD_TEST( vu_test( vu_permute2( x, y, 0, 2, 1, 3 ), x0, x2, y1, y3 ) );
+    FD_TEST( vu_test( vu_permute2( x, y, 3, 2, 1, 0 ), x3, x2, y1, y0 ) );
 
     /* Bit operations */
 

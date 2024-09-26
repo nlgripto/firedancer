@@ -50,12 +50,12 @@ bench_cmd_args( int *    pargc,
 }
 
 static void *
-solana_labs_thread_main( void * _args ) {
+agave_thread_main( void * _args ) {
   config_t * config = _args;
-  solana_labs_boot( config );
+  agave_boot( config );
 
-  /* Solana Labs will never exit, we never set exit flag to true */
-  FD_LOG_ERR(( "solana_labs_boot() exited" ));
+  /* Agave will never exit, we never set exit flag to true */
+  FD_LOG_ERR(( "agave_boot() exited" ));
   return NULL;
 }
 
@@ -84,6 +84,10 @@ add_bench_topo( fd_topo_t  * topo,
     FD_LOG_ERR(( "The benchmark topology you are using has %lu tiles, but the CPU affinity specified "
                  "in the [development.bench.affinity] only provides for %lu cores. ",
                  benchg_tile_cnt+1UL+benchs_tile_cnt, affinity_tile_cnt ));
+  else if( FD_UNLIKELY( affinity_tile_cnt>benchg_tile_cnt+1UL+benchs_tile_cnt ) )
+    FD_LOG_WARNING(( "The benchmark topology you are using has %lu tiles, but the CPU affinity specified "
+                     "in the [development.bench.affinity] provides for %lu cores. The extra cores will be unused.",
+                     benchg_tile_cnt+1UL+benchs_tile_cnt, affinity_tile_cnt ));
 
   fd_topo_tile_t * bencho = fd_topob_tile( topo, "bencho", "bench", "bench", "bench", tile_to_cpu[ 0 ], 0, "bencho_out", 0 );
   bencho->bencho.rpc_port    = rpc_port;
@@ -121,6 +125,9 @@ bench_cmd_fn( args_t *         args,
                                    config->tiles.quic.regular_transaction_listen_port,
                                    config->tiles.quic.quic_transaction_listen_port );
 
+  config->rpc.port     = fd_ushort_if( config->rpc.port, config->rpc.port, 8899 );
+  config->rpc.full_api = 1;
+
   add_bench_topo( &config->topo,
                   config->development.bench.affinity,
                   config->development.bench.benchg_tile_count,
@@ -144,12 +151,14 @@ bench_cmd_fn( args_t *         args,
 
   update_config_for_dev( config );
 
+  run_firedancer_init( config, 1 );
+
   fd_log_private_shared_lock[ 1 ] = 0;
   fd_topo_join_workspaces( &config->topo, FD_SHMEM_JOIN_MODE_READ_WRITE );
 
   fd_topo_run_single_process( &config->topo, 2, config->uid, config->gid, fdctl_tile_run, NULL );
-  pthread_t solana;
-  pthread_create( &solana, NULL, solana_labs_thread_main, config );
+  pthread_t agave;
+  pthread_create( &agave, NULL, agave_thread_main, config );
 
   /* Sleep parent thread forever, Ctrl+C will terminate. */
   for(;;) pause();

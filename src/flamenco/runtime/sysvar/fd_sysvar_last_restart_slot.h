@@ -1,7 +1,8 @@
 #ifndef HEADER_fd_src_flamenco_runtime_fd_sysvar_last_restart_slot_h
 #define HEADER_fd_src_flamenco_runtime_fd_sysvar_last_restart_slot_h
 
-#include "../fd_executor.h"
+#include "../../fd_flamenco_base.h"
+#include "../../types/fd_types.h"
 
 FD_PROTOTYPES_BEGIN
 
@@ -12,26 +13,20 @@ FD_PROTOTYPES_BEGIN
 void
 fd_sysvar_last_restart_slot_init( fd_exec_slot_ctx_t * slot_ctx );
 
-/* fd_sysvar_last_restart_slot_read queries the sysvar cache (?) for the
-   slot number at which the last hard fork occurred.  This matches the
-   highest slot number in the bank's "hard forks" list that is not in
-   the future.  On success, returns 0 and writes *result.  On failure,
-   returns an FD_ACC_MGR error code.  Reasons for error include that the
-   "last restart slot sysvar" feature is not yet activated
-   (FD_ACC_MGR_ERR_UNKNOWN_ACCOUNT), or that there is a critical runtime
-   error. */
-
-fd_sol_sysvar_last_restart_slot_t *
-fd_sysvar_last_restart_slot_read( fd_sol_sysvar_last_restart_slot_t * result,
-                                  fd_exec_slot_ctx_t const *          slot_ctx );
-
 /* fd_sysvar_last_restart_slot_update performs a sysvar update before
    transaction processing.  TODO not completely implemented. */
 
 void
 fd_sysvar_last_restart_slot_update( fd_exec_slot_ctx_t * slot_ctx );
 
+/* fd_sysvar_last_restart_slot queries the last restart slot sysvar from the given slot
+   context.  The sysvar is written into *result (may be uninitialized).
+   Returns result on success, NULL otherwise. */
+
+fd_sol_sysvar_last_restart_slot_t *
+fd_sysvar_last_restart_slot_read( fd_sol_sysvar_last_restart_slot_t * result,
+                                  fd_exec_slot_ctx_t const *          slot_ctx );
+
 FD_PROTOTYPES_END
 
 #endif /* HEADER_fd_src_flamenco_runtime_fd_sysvar_last_restart_slot_h */
-
