@@ -20,6 +20,9 @@ jobs:
           submodules: recursive
 
       - uses: ./.github/actions/deps
+        with:
+          compiler: clang
+          compiler-version: 17
 
 
       - run: sudo apt update && sudo apt install -y zip
@@ -44,8 +47,11 @@ jobs:
           ls ${{ env.OBJ_DIR }}/lib
           ls ${{ env.COV_OBJ_DIR}}/lib
           cd src && pwd > buildpwd && cd -
-          # we give it this path so that the glob hits.
           git config --global --add safe.directory /github/workspace/${{ env.OBJ_DIR}}/lib
+          sudo mkdir -p build/cov/lib
+          sudo chmod -R 777 build/cov/lib
+          cp -r src/ build/cov/lib/libfd_exec_sol_compat_src/
+          # we give it this path so that the glob hits.
           cp -r src/ ${{ env.COV_OBJ_DIR}}/lib/libfd_exec_sol_compat_src/
           # rename the coverage .so's so they don't overwrite on unpack.
           mv ${{ env.COV_OBJ_DIR }}/lib/libfd_exec_sol_compat.so ${{ env.COV_OBJ_DIR }}/lib/libfd_exec_sol_compat_cov.so
