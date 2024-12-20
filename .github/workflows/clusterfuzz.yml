@@ -90,7 +90,7 @@ jobs:
         with:
           submodules: recursive
 
-      # - uses: ./.github/actions/deps
+      - uses: ./.github/actions/deps
 
       - run: sudo apt update && sudo apt install -y zip
 
