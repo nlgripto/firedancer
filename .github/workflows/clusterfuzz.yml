@@ -19,6 +19,9 @@ jobs:
         with:
           submodules: recursive
 
+      - uses: ./.github/actions/deps
+
+
       - run: sudo apt update && sudo apt install -y zip
 
       - uses: asymmetric-research/clusterfuzz-fuzzbot-builder@main
