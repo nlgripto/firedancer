@@ -19,8 +19,6 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: ./.github/actions/deps
-
       - run: sudo apt update && sudo apt install -y zip
 
       - uses: asymmetric-research/clusterfuzz-fuzzbot-builder@main
@@ -44,6 +42,7 @@ jobs:
           ls ${{ env.COV_OBJ_DIR}}/lib
           cd src && pwd > buildpwd && cd -
           # we give it this path so that the glob hits.
+          git config --global --add safe.directory /github/workspace/${{ env.OBJ_DIR}}/lib
           cp -r src/ ${{ env.COV_OBJ_DIR}}/lib/libfd_exec_sol_compat_src/
           # rename the coverage .so's so they don't overwrite on unpack.
           mv ${{ env.COV_OBJ_DIR }}/lib/libfd_exec_sol_compat.so ${{ env.COV_OBJ_DIR }}/lib/libfd_exec_sol_compat_cov.so
