@@ -103,11 +103,26 @@ LLVMFuzzerTestOneInput( uchar const * data,
   /* Close the server end so the client sees EOF after reading */
   close( server_fd );
 
-  /* Call read_conn directly to exercise the HTTP parsing logic */
+  /* Call read_conn in a bounded loop to handle multi-chunk reads.
+     This allows us to consume the full response even when the kernel
+     splits the write into multiple recv() calls. */
   uchar * buffer    = NULL;
   ulong   buffer_sz = 0UL;
-  int result = read_conn( client, 0UL, &buffer, &buffer_sz );
-  (void)result; /* Result doesn't matter for fuzzing - we're testing for crashes */
+  for( ulong i=0UL; i<8UL; i++ ) {
+    int result = read_conn( client, 0UL, &buffer, &buffer_sz );
+    
+    /* result == 0: success, full response received and parsed */
+    if( FD_LIKELY( 0==result ) ) {
+      FD_FUZZ_MUST_BE_COVERED;
+      break;
+    }
+    
+    /* result == 1: need more data, or connection closed/error */
+    /* Check if peer was closed (fd == -1 after close_one) */
+    if( FD_UNLIKELY( -1==client->pollfds[0].fd ) ) break;
+    
+    /* Otherwise, continue reading (handles EAGAIN, incomplete parse) */
+  }
 
   /* Clean up */
   close( client_fd );
