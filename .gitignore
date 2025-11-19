@@ -82,3 +82,5 @@ deps-bundle.tar.zst
 # Python
 venv
 *.pyc
+corpus/fuzz_genesis_client/*
+!corpus/fuzz_genesis_client/seed_*.txt
