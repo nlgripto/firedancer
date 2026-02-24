@@ -1607,15 +1607,17 @@ fd_executor_txn_check( fd_runtime_t * runtime,
 
   /* https://github.com/anza-xyz/agave/blob/b2c388d6cbff9b765d574bbb83a4378a1fc8af32/svm/src/account_rent_state.rs#L63 */
   for( ulong i=0UL; i<txn_out->accounts.cnt; i++ ) {
-    if( !txn_out->accounts.is_writable[i] ) continue;
-
     ulong               starting_lamports = runtime->accounts.starting_lamports[i];
     ulong               starting_dlen     = runtime->accounts.starting_dlen[i];
     fd_account_meta_t * meta              = txn_out->accounts.account[i].meta;
     fd_pubkey_t *       pubkey            = &txn_out->accounts.keys[i];
 
+    if( FD_UNLIKELY( !meta ) ) continue;
+
     fd_uwide_inc( &ending_lamports_h, &ending_lamports_l, ending_lamports_h, ending_lamports_l, meta->lamports );
     fd_uwide_inc( &starting_lamports_h, &starting_lamports_l, starting_lamports_h, starting_lamports_l, starting_lamports );
+
+    if( !txn_out->accounts.is_writable[i] ) continue;
 
     /* Rent states are defined as followed:
         - lamports == 0                      -> Uninitialized
